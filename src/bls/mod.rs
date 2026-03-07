@@ -120,11 +120,12 @@ impl traits::Signer for BlsSigner {
 
 impl traits::KeyPair for BlsSigner {
     fn generate() -> Result<Self, SignerError> {
+        use zeroize::Zeroize;
         let mut ikm = [0u8; 32];
         getrandom::getrandom(&mut ikm).map_err(|_| SignerError::EntropyError)?;
         let secret_key =
             SecretKey::key_gen(&ikm, &[]).map_err(|_| SignerError::EntropyError)?;
-        ikm.iter_mut().for_each(|b| *b = 0); // zeroize seed
+        ikm.zeroize(); // volatile write barrier — cannot be optimized away
         Ok(Self { secret_key })
     }
 
