@@ -122,6 +122,27 @@ impl EthereumSigner {
         let digest = eip712_hash(domain_separator, struct_hash);
         self.sign_digest(&digest)
     }
+
+    /// **EIP-191**: Sign a personal message (as used by MetaMask `personal_sign`).
+    ///
+    /// Computes `keccak256("\x19Ethereum Signed Message:\n{len}{message}")` and signs it.
+    /// This is the standard for off-chain message signing in Ethereum wallets.
+    pub fn personal_sign(&self, message: &[u8]) -> Result<EthereumSignature, SignerError> {
+        let digest = eip191_hash(message);
+        self.sign_digest(&digest)
+    }
+}
+
+/// Compute the EIP-191 personal message hash:
+/// `keccak256("\x19Ethereum Signed Message:\n" || len(message) || message)`
+pub fn eip191_hash(message: &[u8]) -> [u8; 32] {
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
+    let mut hasher = Keccak256::new();
+    hasher.update(prefix.as_bytes());
+    hasher.update(message);
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&hasher.finalize());
+    hash
 }
 
 /// **EIP-712** domain separator parameters.
@@ -343,6 +364,18 @@ impl EthereumVerifier {
         signature: &EthereumSignature,
     ) -> Result<bool, SignerError> {
         let digest = eip712_hash(domain_separator, struct_hash);
+        self.verify_digest(&digest, signature)
+    }
+
+    /// **EIP-191**: Verify a personal message signature.
+    ///
+    /// Recomputes `keccak256("\x19Ethereum Signed Message:\n{len}{message}")` and verifies.
+    pub fn verify_personal_sign(
+        &self,
+        message: &[u8],
+        signature: &EthereumSignature,
+    ) -> Result<bool, SignerError> {
+        let digest = eip191_hash(message);
         self.verify_digest(&digest, signature)
     }
 }
@@ -622,6 +655,49 @@ mod tests {
         // Verify with wrong domain must fail
         let wrong_domain = [0xFF_u8; 32];
         let result = verifier.verify_typed_data(&wrong_domain, &struct_hash, &sig).unwrap();
+        assert!(!result);
+    }
+
+    // ─── EIP-191 Tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_eip191_sign_verify_roundtrip() {
+        let signer = EthereumSigner::generate().unwrap();
+        let verifier = EthereumVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let msg = b"Hello from trad-signer!";
+        let sig = signer.personal_sign(msg).unwrap();
+        assert!(sig.v == 27 || sig.v == 28);
+        assert!(verifier.verify_personal_sign(msg, &sig).unwrap());
+    }
+
+    #[test]
+    fn test_eip191_hash_known_vector() {
+        // keccak256("\x19Ethereum Signed Message:\n5hello")
+        let hash = eip191_hash(b"hello");
+        let expected = Keccak256::digest(b"\x19Ethereum Signed Message:\n5hello");
+        assert_eq!(&hash[..], &expected[..]);
+    }
+
+    #[test]
+    fn test_eip191_wrong_message_fails() {
+        let signer = EthereumSigner::generate().unwrap();
+        let verifier = EthereumVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let sig = signer.personal_sign(b"correct message").unwrap();
+        let result = verifier.verify_personal_sign(b"wrong message", &sig);
+        assert!(result.is_err() || !result.unwrap());
+    }
+
+    #[test]
+    fn test_eip191_differs_from_raw_sign() {
+        let signer = EthereumSigner::generate().unwrap();
+        let verifier = EthereumVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let msg = b"test";
+        let raw_sig = signer.sign(msg).unwrap();
+        let personal_sig = signer.personal_sign(msg).unwrap();
+        // They must produce different signatures (different hash)
+        assert_ne!(raw_sig.r, personal_sig.r);
+        // personal_sign signature should NOT verify via raw verify
+        let result = verifier.verify(msg, &personal_sig).unwrap();
         assert!(!result);
     }
 }

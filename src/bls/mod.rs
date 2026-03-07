@@ -244,6 +244,39 @@ pub fn verify_aggregated(
     Ok(result == BLST_ERROR::BLST_SUCCESS)
 }
 
+/// Verify an aggregated BLS signature where each signer signed a **different message**.
+///
+/// This is the standard ETH2 attestation pattern: N validators each sign their own
+/// message, the signatures are aggregated, and the verifier checks all (pk, msg) pairs
+/// against the single aggregated signature.
+///
+/// `pairs`: slice of `(public_key, message)` tuples.
+pub fn verify_aggregated_multi(
+    pairs: &[(BlsPublicKey, &[u8])],
+    agg_signature: &BlsSignature,
+) -> Result<bool, SignerError> {
+    if pairs.is_empty() {
+        return Err(SignerError::AggregationError("no pairs to verify".into()));
+    }
+
+    let pks: Vec<PublicKey> = pairs
+        .iter()
+        .map(|(pk, _)| {
+            PublicKey::from_bytes(&pk.bytes)
+                .map_err(|_| SignerError::InvalidPublicKey("invalid BLS public key".into()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let pk_refs: Vec<&PublicKey> = pks.iter().collect();
+    let msgs: Vec<&[u8]> = pairs.iter().map(|(_, m)| *m).collect();
+
+    let sig = BlstSignature::from_bytes(&agg_signature.bytes)
+        .map_err(|_| SignerError::InvalidSignature("invalid BLS signature".into()))?;
+
+    let result = sig.aggregate_verify(true, &msgs, ETH2_DST, &pk_refs, true);
+    Ok(result == BLST_ERROR::BLST_SUCCESS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +413,46 @@ mod tests {
         let signer = BlsSigner::generate().unwrap();
         let _: Zeroizing<Vec<u8>> = signer.private_key_bytes();
         drop(signer);
+    }
+
+    #[test]
+    fn test_multi_message_aggregation() {
+        let s1 = BlsSigner::generate().unwrap();
+        let s2 = BlsSigner::generate().unwrap();
+        let s3 = BlsSigner::generate().unwrap();
+
+        let msg1 = b"attestation slot 100";
+        let msg2 = b"attestation slot 101";
+        let msg3 = b"attestation slot 102";
+
+        let sig1 = s1.sign(msg1).unwrap();
+        let sig2 = s2.sign(msg2).unwrap();
+        let sig3 = s3.sign(msg3).unwrap();
+
+        let agg = aggregate_signatures(&[sig1, sig2, sig3]).unwrap();
+
+        let pairs: Vec<(BlsPublicKey, &[u8])> = vec![
+            (s1.public_key(), msg1.as_slice()),
+            (s2.public_key(), msg2.as_slice()),
+            (s3.public_key(), msg3.as_slice()),
+        ];
+        assert!(verify_aggregated_multi(&pairs, &agg).unwrap());
+    }
+
+    #[test]
+    fn test_multi_message_wrong_message_fails() {
+        let s1 = BlsSigner::generate().unwrap();
+        let s2 = BlsSigner::generate().unwrap();
+
+        let sig1 = s1.sign(b"correct 1").unwrap();
+        let sig2 = s2.sign(b"correct 2").unwrap();
+
+        let agg = aggregate_signatures(&[sig1, sig2]).unwrap();
+
+        let pairs: Vec<(BlsPublicKey, &[u8])> = vec![
+            (s1.public_key(), b"correct 1".as_slice()),
+            (s2.public_key(), b"WRONG MESSAGE".as_slice()), // wrong
+        ];
+        assert!(!verify_aggregated_multi(&pairs, &agg).unwrap());
     }
 }
