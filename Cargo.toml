@@ -1,6 +1,6 @@
 [package]
 name = "trad-signer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,16 @@ keywords = ["crypto", "blockchain", "signing", "ecdsa", "bls"]
 categories = ["cryptography"]
 
 [features]
-default = ["std", "ethereum", "bitcoin", "solana", "xrp", "neo", "bls"]
+default = [
+    "std",
+    "ethereum",
+    "bitcoin",
+    "solana",
+    "xrp",
+    "neo",
+    "bls",
+    "hd_key",
+]
 std = []
 serde = ["dep:serde", "k256/serde", "p256/serde"]
 ethereum = ["dep:k256", "dep:sha3"]
@@ -25,6 +34,7 @@ xrp = [
 ]
 neo = ["dep:p256", "dep:sha2"]
 bls = ["dep:blst"]
+hd_key = ["dep:k256", "dep:sha2", "dep:hmac"]
 
 [dependencies]
 # ECDSA curves
@@ -46,6 +56,7 @@ blst = { version = "0.3", optional = true }
 sha2 = { version = "0.10", optional = true }
 sha3 = { version = "0.10", optional = true }
 ripemd = { version = "0.1", optional = true }
+hmac = { version = "0.12", optional = true }
 
 # Security
 subtle = "2.6"
