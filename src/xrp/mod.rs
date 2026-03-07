@@ -21,9 +21,26 @@ impl XrpSignature {
     }
 
     /// Import from raw bytes.
+    ///
+    /// Validates structural format: DER-encoded ECDSA (starts with `0x30`)
+    /// or 64-byte Ed25519 signature.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, SignerError> {
         if bytes.is_empty() {
             return Err(SignerError::InvalidSignature("empty signature".into()));
+        }
+        // Validate: either DER ECDSA (0x30 tag) or 64-byte Ed25519
+        if bytes[0] == 0x30 {
+            // DER ECDSA: verify the length byte matches
+            if bytes.len() < 3 || bytes.len() > 73 {
+                return Err(SignerError::InvalidSignature(format!(
+                    "invalid DER signature length: {}", bytes.len()
+                )));
+            }
+        } else if bytes.len() != 64 {
+            return Err(SignerError::InvalidSignature(format!(
+                "expected 64-byte Ed25519 or DER ECDSA, got {} bytes starting with 0x{:02x}",
+                bytes.len(), bytes[0]
+            )));
         }
         Ok(Self {
             bytes: bytes.to_vec(),
@@ -222,6 +239,9 @@ impl traits::Signer for XrpEddsaSigner {
         })
     }
 
+    /// **Note:** Ed25519 hashes internally per RFC 8032. This method is identical to
+    /// [`sign()`](Self::sign) — the `digest` parameter is treated as a raw message, not a
+    /// pre-computed hash. For consistency with the `Signer` trait, this is provided as-is.
     fn sign_prehashed(&self, digest: &[u8]) -> Result<XrpSignature, SignerError> {
         // Ed25519 has no internal hashing step in XRP context,
         // so prehashed == raw sign

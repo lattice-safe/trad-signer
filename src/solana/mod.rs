@@ -59,6 +59,9 @@ impl traits::Signer for SolanaSigner {
         })
     }
 
+    /// **Note:** Ed25519 hashes internally per RFC 8032. This method is identical to
+    /// [`sign()`](Self::sign) — the `digest` parameter is treated as a raw message, not a
+    /// pre-computed hash. For consistency with the `Signer` trait, this is provided as-is.
     fn sign_prehashed(&self, digest: &[u8]) -> Result<SolanaSignature, SignerError> {
         // Ed25519 has no internal pre-hashing in Solana context.
         // sign_prehashed is equivalent to sign (the caller provides the raw payload).
@@ -99,8 +102,10 @@ impl traits::KeyPair for SolanaSigner {
     }
 
     /// Import from Solana's 64-byte keypair format (seed ∥ pubkey).
-    /// Validates that the derived public key matches bytes[32..64].
+    /// Validates that the derived public key matches bytes[32..64]
+    /// using constant-time comparison to prevent timing side-channels.
     fn from_keypair_bytes(keypair: &[u8]) -> Result<Self, SignerError> {
+        use subtle::ConstantTimeEq;
         if keypair.len() != 64 {
             return Err(SignerError::InvalidPrivateKey(format!(
                 "expected 64-byte keypair, got {}",
@@ -109,12 +114,13 @@ impl traits::KeyPair for SolanaSigner {
         }
         let signer = Self::from_bytes(&keypair[..32])?;
         let derived_pk = signer.signing_key.verifying_key().as_bytes().to_vec();
-        if derived_pk[..] != keypair[32..] {
-            return Err(SignerError::InvalidPrivateKey(
+        if derived_pk.ct_eq(&keypair[32..]).into() {
+            Ok(signer)
+        } else {
+            Err(SignerError::InvalidPrivateKey(
                 "pubkey in keypair does not match derived pubkey".into(),
-            ));
+            ))
         }
-        Ok(signer)
     }
 
     /// Export as Solana's 64-byte keypair (seed ∥ pubkey).

@@ -135,10 +135,32 @@ impl EthereumSigner {
 
 /// Compute the EIP-191 personal message hash:
 /// `keccak256("\x19Ethereum Signed Message:\n" || len(message) || message)`
+///
+/// Uses stack-based formatting to avoid heap allocation.
 pub fn eip191_hash(message: &[u8]) -> [u8; 32] {
-    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
+    use core::fmt::Write;
+    // Max message length decimal digits: usize::MAX = 20 digits
+    // Prefix is 26 bytes + up to 20 digits = 46 bytes max
+    let mut prefix_buf = [0u8; 64];
+    let prefix_len = {
+        struct SliceWriter<'a> { buf: &'a mut [u8], pos: usize }
+        impl<'a> Write for SliceWriter<'a> {
+            fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                let bytes = s.as_bytes();
+                let end = self.pos + bytes.len();
+                if end > self.buf.len() { return Err(core::fmt::Error); }
+                self.buf[self.pos..end].copy_from_slice(bytes);
+                self.pos = end;
+                Ok(())
+            }
+        }
+        let mut w = SliceWriter { buf: &mut prefix_buf, pos: 0 };
+        // write_fmt cannot fail here — buffer is large enough
+        let _ = write!(w, "\x19Ethereum Signed Message:\n{}", message.len());
+        w.pos
+    };
     let mut hasher = Keccak256::new();
-    hasher.update(prefix.as_bytes());
+    hasher.update(&prefix_buf[..prefix_len]);
     hasher.update(message);
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&hasher.finalize());
