@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.8.0] — 2026-03-09
+
+### ⚠ Breaking Changes
+- **`EthereumSignature.v`**: Changed from `u8` to `u64` to support EIP-155 chain IDs > 110 (Polygon, Arbitrum, Base, Optimism, Sepolia, etc.)
+- Added `recovery_bit()` method and `to_bytes_eip155()` for large chain ID signatures
+
+### Fixed
+- **Private key leak in `keypair_bytes()`**: No longer copies private key into unprotected `Vec` before re-wrapping in `Zeroizing`
+- **All 7 signers' `generate()` now use `secure_random()`**: Ethereum, Bitcoin, Schnorr, Solana, NEO, XRP ECDSA, XRP EdDSA — `set_custom_rng()` is now honored in TEE environments
+- **`ct_hex_val` fully branchless**: Returns `(value, mask)` tuple — no data-dependent branches
+- **`ct_hex_decode` timing leak**: No longer returns early on odd-length input
+- **`validate_address` constant-time**: XRP and NEO checksum validation uses `subtle::ConstantTimeEq`
+- **`GuardedMemory` mlock pointer stability**: Inner storage changed from `Vec<u8>` to `Box<[u8]>` — never reallocates, mlock'd pointer guaranteed stable
+- **`to_seed` salt leak**: Salt `String` containing passphrase is now zeroized after PBKDF2
+
+### Added
+- **BLS re-exported from `ethereum::bls`**: BLS12-381 accessible via `ethereum::bls` (top-level `bls` kept for compat)
+- **`Display`** for `XrpSignature`, `BlsSignature`, `NeoSignature`
+- **`PartialEq`/`Eq`** derived for all 7 signature types
+- **`#[must_use]`** on all 7 signature types
+
+### Changed
+- **Mnemonic word lookup**: `from_phrase()` uses binary search (was O(n) linear scan)
+- **`bip85::entropy_to_mnemonic`**: Delegates to `Mnemonic::from_entropy` (eliminated duplicate implementation)
+
 ## [0.7.0] — 2026-03-09
 
 ### Added

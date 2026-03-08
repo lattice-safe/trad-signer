@@ -7,23 +7,25 @@ description: Multi-chain cryptographic signing SDK for Rust. Use when working wi
 
 ## Project Overview
 
-**chains-sdk** is a unified, secure multi-chain signing SDK for Rust (v0.7.0). It provides cryptographic signing across 5 blockchains and 8 algorithms from a single crate.
+**chains-sdk** is a unified, secure multi-chain signing SDK for Rust (v0.8.0). It provides cryptographic signing across 5 blockchains and 8 algorithms from a single crate.
 
 | Metric | Value |
 |--------|-------|
-| Source | 27,691 lines across 56 `.rs` files |
-| Tests | 1,007 (all passing, 0 ignored) |
+| Source | ~28,000 lines across 56 `.rs` files |
+| Tests | 1,006 (all passing, 0 ignored) |
 | Clippy | 0 warnings |
 | MSRV | Rust 1.75 |
 
 ## What You Probably Got Wrong
 
-1. **The `v` field in `EthereumSignature` is `u8`, not `u64`.** EIP-155 chain-specific values are computed separately via `sign_with_chain_id()`.
+1. **The `v` field in `EthereumSignature` is `u64` (since v0.8.0).** It supports EIP-155 chain IDs of any size. Use `recovery_bit()` to extract the 0/1 recovery value. Use `to_bytes()` for legacy 65-byte encoding or `to_bytes_eip155()` for full-fidelity encoding.
 2. **Ed25519 keys for Solana are NOT derived from BIP-32.** BIP-32 produces secp256k1 keys. The raw 32-byte seed from HD derivation is used directly as the Ed25519 seed.
 3. **`to_wif()` and `to_xprv()` return `Zeroizing<String>`**, not `String`. You must dereference with `&*wif` or `.as_str()` equivalent.
 4. **FROST nonces are single-use.** After calling `signing::sign()`, the nonce is consumed (moved). Creating a second signature requires new `commit()` calls.
 5. **`custom_rng` is a separate feature.** Use `set_custom_rng()` only with the `custom_rng` feature enabled. It uses `OnceLock` — can only be set once per process.
 6. **`missing_docs` is `deny`, not `warn`.** Every public item MUST have a doc comment or compilation fails.
+7. **All `generate()` methods use `secure_random()`**, not `OsRng`. If you set a custom RNG via `set_custom_rng()`, all key generation respects it.
+8. **All signature types derive `PartialEq`, `Eq` and are `#[must_use]`.** BLS is accessible via both `bls::` and `ethereum::bls::`.
 
 ---
 
@@ -45,7 +47,7 @@ src/
 ├── solana/             # Ed25519, SPL Token, System, PDA derivation
 ├── xrp/                # ECDSA + Ed25519, binary codec, multisign
 ├── neo/                # P-256 ECDSA, NeoVM, NEP-17/11
-├── bls/                # BLS12-381, threshold, EIP-2333 key derivation
+├── bls/                # BLS12-381, threshold, EIP-2333 (also re-exported as ethereum::bls)
 └── threshold/
     ├── frost/          # RFC 9591 (keygen, signing, DKG, refresh)
     └── musig2/         # BIP-327 (signing, adaptor, tweak, nested)
@@ -56,7 +58,7 @@ src/
 ```toml
 # Default: all chain + threshold features ON
 # Minimal build:
-chains-sdk = { version = "0.7", default-features = false, features = ["ethereum"] }
+chains-sdk = { version = "0.8", default-features = false, features = ["ethereum"] }
 ```
 
 | Feature | What it enables |
@@ -184,9 +186,11 @@ let sig = signer.sign_typed_data(&separator, &struct_hash)?;
 3. **`#![deny(missing_docs)]`** — All public items must have doc comments.
 4. **All key material in `Zeroizing<T>`** — Never return raw `Vec<u8>` for private keys.
 5. **RFC 6979 deterministic nonces** — All ECDSA (secp256k1 + P-256). Never roll your own.
-6. **Constant-time comparisons** — Use `subtle::ConstantTimeEq` for signatures, checksums, public keys.
-7. **Constant-time hex** — Use `ct_hex_encode` / `ct_hex_decode` from `security.rs` for secret material.
+6. **Constant-time comparisons** — Use `subtle::ConstantTimeEq` for signatures, checksums, public keys. All `validate_address()` functions use CT checksum comparison.
+7. **Constant-time hex** — `ct_hex_decode` / `ct_hex_val` are fully branchless. No early returns, no data-dependent branches.
 8. **Debug redaction** — `GuardedMemory` prints `[REDACTED]`. Never format key bytes in errors.
+9. **`GuardedMemory` uses `Box<[u8]>`** — Not `Vec<u8>`. This guarantees the mlock'd pointer is never invalidated by reallocation.
+10. **`generate()` uses `secure_random()`** — All 7 signers use the SDK's pluggable RNG, not `OsRng` directly.
 
 ### Testing Requirements
 
@@ -286,14 +290,15 @@ When reviewing contracts that this SDK will interact with, use the 20-domain EVM
 
 ### Adding a New Signature Scheme
 
-1. Define the signature struct (implement `Debug`, `Clone`, `Display`)
-2. If serde: add `#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]`
-3. `to_bytes()` + `from_bytes()` methods
-4. Implement `Signer` trait with `sign()`, `sign_prehashed()`, `public_key_bytes()`
-5. Implement `KeyPair` trait with `generate()`, `from_bytes()`, `private_key_bytes()`
-6. `private_key_bytes()` must return `Zeroizing<Vec<u8>>`
-7. Add RFC/BIP test vectors
-8. Add fuzz target in `fuzz/fuzz_targets/`
+1. Define the signature struct with `#[derive(Debug, Clone, PartialEq, Eq)]` and `#[must_use]`
+2. Implement `Display` (hex-formatted output)
+3. If serde: add `#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]`
+4. `to_bytes()` + `from_bytes()` methods
+5. Implement `Signer` trait with `sign()`, `sign_prehashed()`, `public_key_bytes()`
+6. Implement `KeyPair` trait with `generate()` using `secure_random()`, `from_bytes()`, `private_key_bytes()`
+7. `private_key_bytes()` must return `Zeroizing<Vec<u8>>`
+8. Add RFC/BIP test vectors
+9. Add fuzz target in `fuzz/fuzz_targets/`
 
 ### Running the Test Suite
 

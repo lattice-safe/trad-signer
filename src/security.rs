@@ -98,6 +98,9 @@ pub fn secure_zero(data: &mut [u8]) {
 /// 3. Protected from accidental copies
 /// 4. Locked in RAM (when `mlock` feature is enabled)
 ///
+/// Uses `Box<[u8]>` internally (not `Vec<u8>`) to guarantee the backing
+/// pointer is never invalidated by reallocation — critical for `mlock` safety.
+///
 /// # Example
 /// ```
 /// use chains_sdk::security::GuardedMemory;
@@ -107,7 +110,7 @@ pub fn secure_zero(data: &mut [u8]) {
 /// // memory is automatically zeroized (and munlocked) when `guard` is dropped
 /// ```
 pub struct GuardedMemory {
-    inner: Zeroizing<Vec<u8>>,
+    inner: Zeroizing<Box<[u8]>>,
 }
 
 impl GuardedMemory {
@@ -117,10 +120,10 @@ impl GuardedMemory {
     /// to prevent the OS from swapping it to disk.
     #[must_use]
     pub fn new(size: usize) -> Self {
-        let inner = Zeroizing::new(vec![0u8; size]);
+        let boxed: Box<[u8]> = vec![0u8; size].into_boxed_slice();
         #[cfg(feature = "mlock")]
-        lock_memory(inner.as_ptr(), inner.len());
-        Self { inner }
+        lock_memory(boxed.as_ptr(), boxed.len());
+        Self { inner: Zeroizing::new(boxed) }
     }
 
     /// Create from existing data (takes ownership, original is NOT zeroized).
@@ -129,10 +132,10 @@ impl GuardedMemory {
     /// have the data in a `Vec<u8>`.
     #[must_use]
     pub fn from_vec(data: Vec<u8>) -> Self {
-        let inner = Zeroizing::new(data);
+        let boxed: Box<[u8]> = data.into_boxed_slice();
         #[cfg(feature = "mlock")]
-        lock_memory(inner.as_ptr(), inner.len());
-        Self { inner }
+        lock_memory(boxed.as_ptr(), boxed.len());
+        Self { inner: Zeroizing::new(boxed) }
     }
 }
 
@@ -154,9 +157,9 @@ impl Drop for GuardedMemory {
     #[allow(unsafe_code)]
     fn drop(&mut self) {
         // Unlock memory before zeroization (Zeroizing handles the zeroing).
-        // SAFETY: `self.inner` is a valid, heap-allocated `Vec<u8>` that was
-        // locked via `lock_memory` in `new()` / `from_vec()`. The pointer and
-        // length are guaranteed valid for the lifetime of this struct.
+        // SAFETY: `self.inner` is a `Box<[u8]>` allocated via `into_boxed_slice()`.
+        // Box<[u8]> never reallocates, so the pointer passed to `lock_memory`
+        // in `new()` / `from_vec()` is guaranteed to be the same pointer here.
         #[cfg(feature = "mlock")]
         unlock_memory(self.inner.as_ptr(), self.inner.len());
     }
