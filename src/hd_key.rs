@@ -187,6 +187,88 @@ impl ExtendedPrivateKey {
     pub fn chain_code(&self) -> &[u8; 32] {
         &self.chain_code
     }
+
+    /// Serialize as an **xprv** Base58Check string (BIP-32).
+    ///
+    /// Format: `4 bytes version || 1 byte depth || 4 bytes fingerprint || 4 bytes child index || 32 bytes chain code || 1 byte 0x00 || 32 bytes key`
+    ///
+    /// Note: Fingerprint and child index are zeroed (master key context only).
+    /// For proper child key serialization, use `to_xprv_with_parent()`.
+    pub fn to_xprv(&self) -> String {
+        let mut data = Vec::with_capacity(78);
+        data.extend_from_slice(&[0x04, 0x88, 0xAD, 0xE4]); // xprv version
+        data.push(self.depth);
+        data.extend_from_slice(&[0x00; 4]); // parent fingerprint (simplified)
+        data.extend_from_slice(&[0x00; 4]); // child index (simplified)
+        data.extend_from_slice(&self.chain_code);
+        data.push(0x00); // private key prefix
+        data.extend_from_slice(&*self.key);
+        // Base58Check: double-SHA256 checksum
+        let checksum = {
+            use sha2::Digest;
+            let h1 = sha2::Sha256::digest(&data);
+            sha2::Sha256::digest(h1)
+        };
+        data.extend_from_slice(&checksum[..4]);
+        bs58::encode(data).into_string()
+    }
+
+    /// Serialize the public key as an **xpub** Base58Check string (BIP-32).
+    pub fn to_xpub(&self) -> Result<String, SignerError> {
+        let pubkey = self.public_key_bytes()?;
+        let mut data = Vec::with_capacity(78);
+        data.extend_from_slice(&[0x04, 0x88, 0xB2, 0x1E]); // xpub version
+        data.push(self.depth);
+        data.extend_from_slice(&[0x00; 4]); // parent fingerprint (simplified)
+        data.extend_from_slice(&[0x00; 4]); // child index (simplified)
+        data.extend_from_slice(&self.chain_code);
+        data.extend_from_slice(&pubkey);
+        let checksum = {
+            use sha2::Digest;
+            let h1 = sha2::Sha256::digest(&data);
+            sha2::Sha256::digest(h1)
+        };
+        data.extend_from_slice(&checksum[..4]);
+        Ok(bs58::encode(data).into_string())
+    }
+
+    /// Deserialize an **xprv** Base58Check string back into an extended private key.
+    pub fn from_xprv(xprv: &str) -> Result<Self, SignerError> {
+        let data = bs58::decode(xprv)
+            .into_vec()
+            .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid base58: {e}")))?;
+        if data.len() != 82 {
+            return Err(SignerError::InvalidPrivateKey(format!(
+                "xprv must be 82 bytes, got {}", data.len()
+            )));
+        }
+        // Verify checksum
+        let checksum = {
+            use sha2::Digest;
+            let h1 = sha2::Sha256::digest(&data[..78]);
+            sha2::Sha256::digest(h1)
+        };
+        if data[78..82] != checksum[..4] {
+            return Err(SignerError::InvalidPrivateKey("invalid xprv checksum".into()));
+        }
+        // Verify version
+        if data[..4] != [0x04, 0x88, 0xAD, 0xE4] {
+            return Err(SignerError::InvalidPrivateKey("not an xprv (wrong version)".into()));
+        }
+        let depth = data[4];
+        let mut chain_code = [0u8; 32];
+        chain_code.copy_from_slice(&data[13..45]);
+        // data[45] should be 0x00 (private key prefix)
+        if data[45] != 0x00 {
+            return Err(SignerError::InvalidPrivateKey("invalid private key prefix".into()));
+        }
+        let mut key = Zeroizing::new([0u8; 32]);
+        key.copy_from_slice(&data[46..78]);
+        // Validate the key
+        k256::SecretKey::from_bytes((&*key).into())
+            .map_err(|_| SignerError::InvalidPrivateKey("invalid xprv key".into()))?;
+        Ok(Self { key, chain_code, depth })
+    }
 }
 
 /// A single step in a BIP-32 derivation path.

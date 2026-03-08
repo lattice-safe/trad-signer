@@ -34,3 +34,6 @@ pub mod bls;
 
 #[cfg(feature = "hd_key")]
 pub mod hd_key;
+
+#[cfg(feature = "mnemonic")]
+pub mod mnemonic;

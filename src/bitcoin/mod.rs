@@ -93,6 +93,28 @@ impl BitcoinSigner {
         bech32_encode("bc", 0, &h160)
     }
 
+    /// Generate a **testnet P2PKH** address (`m...` or `n...`).
+    pub fn p2pkh_testnet_address(&self) -> String {
+        let pubkey = self.signing_key.verifying_key().to_sec1_bytes();
+        let h160 = hash160(&pubkey);
+        base58check_encode(0x6F, &h160) // testnet version byte
+    }
+
+    /// Generate a **testnet P2WPKH** address (`tb1q...`).
+    pub fn p2wpkh_testnet_address(&self) -> Result<String, SignerError> {
+        let pubkey = self.signing_key.verifying_key().to_sec1_bytes();
+        let h160 = hash160(&pubkey);
+        bech32_encode("tb", 0, &h160)
+    }
+
+    /// **BIP-137**: Sign a message with the Bitcoin Signed Message prefix.
+    ///
+    /// Computes `double_sha256("\x18Bitcoin Signed Message:\n" || varint(len) || message)`
+    /// and signs the resulting 32-byte digest.
+    pub fn sign_message(&self, message: &[u8]) -> Result<BitcoinSignature, SignerError> {
+        let digest = bitcoin_message_hash(message);
+        self.sign_digest(&digest)
+    }
 }
 
 /// HASH160: RIPEMD160(SHA256(data)) — the standard Bitcoin hash function.
@@ -123,6 +145,84 @@ pub(crate) fn bech32_encode(hrp: &str, witness_version: u8, program: &[u8]) -> R
         .map_err(|e| SignerError::InvalidPublicKey(format!("witness version: {e}")))?;
     bech32::segwit::encode(hrp, version, program)
         .map_err(|e| SignerError::InvalidPublicKey(format!("bech32 encode: {e}")))
+}
+
+/// **BIP-137**: Hash a message with the Bitcoin Signed Message prefix.
+///
+/// `double_sha256("\x18Bitcoin Signed Message:\n" || varint(len) || message)`
+pub fn bitcoin_message_hash(message: &[u8]) -> [u8; 32] {
+    let mut data = Vec::new();
+    // Prefix: "\x18Bitcoin Signed Message:\n"
+    data.extend_from_slice(b"\x18Bitcoin Signed Message:\n");
+    // Varint-encoded message length
+    data.extend_from_slice(&varint_encode(message.len()));
+    data.extend_from_slice(message);
+    double_sha256(&data)
+}
+
+/// Bitcoin variable-length integer encoding.
+fn varint_encode(n: usize) -> Vec<u8> {
+    if n < 0xFD {
+        vec![n as u8]
+    } else if n <= 0xFFFF {
+        let mut out = vec![0xFD];
+        out.extend_from_slice(&(n as u16).to_le_bytes());
+        out
+    } else {
+        let mut out = vec![0xFE];
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        out
+    }
+}
+
+/// Validate a Bitcoin address string.
+///
+/// Returns `true` if the address is a valid P2PKH (`1...`), P2SH (`3...`),
+/// P2WPKH (`bc1q...`), or P2TR (`bc1p...`) address.
+pub fn validate_address(address: &str) -> bool {
+    validate_mainnet_address(address) || validate_testnet_address(address)
+}
+
+/// Validate a mainnet Bitcoin address.
+pub fn validate_mainnet_address(address: &str) -> bool {
+    if address.starts_with("bc1") {
+        // Bech32/Bech32m
+        bech32::segwit::decode(address).is_ok()
+    } else if address.starts_with('1') || address.starts_with('3') {
+        // Base58Check (P2PKH or P2SH)
+        validate_base58check(address, &[0x00, 0x05])
+    } else {
+        false
+    }
+}
+
+/// Validate a testnet Bitcoin address.
+pub fn validate_testnet_address(address: &str) -> bool {
+    if address.starts_with("tb1") {
+        bech32::segwit::decode(address).is_ok()
+    } else if address.starts_with('m') || address.starts_with('n') || address.starts_with('2') {
+        validate_base58check(address, &[0x6F, 0xC4])
+    } else {
+        false
+    }
+}
+
+/// Validate a Base58Check-encoded address has a valid checksum and version byte.
+fn validate_base58check(address: &str, valid_versions: &[u8]) -> bool {
+    let decoded = match bs58::decode(address).into_vec() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    if decoded.len() != 25 {
+        return false;
+    }
+    // Verify version byte
+    if !valid_versions.contains(&decoded[0]) {
+        return false;
+    }
+    // Verify checksum
+    let checksum = double_sha256(&decoded[..21]);
+    decoded[21..25] == checksum[..4]
 }
 
 impl traits::Signer for BitcoinSigner {

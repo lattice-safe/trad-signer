@@ -132,6 +132,52 @@ impl EthereumSigner {
         self.sign_digest(&digest)
     }
 
+    /// **EIP-155**: Sign a message with chain-specific replay protection.
+    ///
+    /// Produces `v = {0,1} + chain_id * 2 + 35` instead of `v = 27/28`.
+    /// This is required for mainnet Ethereum transactions since the Spurious Dragon fork.
+    ///
+    /// Common chain IDs: 1 (mainnet), 5 (Goerli), 11155111 (Sepolia), 137 (Polygon).
+    pub fn sign_with_chain_id(
+        &self,
+        message: &[u8],
+        chain_id: u64,
+    ) -> Result<EthereumSignature, SignerError> {
+        let digest = Keccak256::digest(message);
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&digest);
+        self.sign_digest_with_chain_id(&hash, chain_id)
+    }
+
+    /// **EIP-155**: Sign a pre-hashed digest with chain-specific replay protection.
+    pub fn sign_digest_with_chain_id(
+        &self,
+        digest: &[u8; 32],
+        chain_id: u64,
+    ) -> Result<EthereumSignature, SignerError> {
+        let mut sig = self.sign_digest(digest)?;
+        // Convert v from legacy (27/28) to EIP-155 (35 + chain_id*2 + {0,1})
+        let recovery_bit = sig.v - 27; // 0 or 1
+        sig.v = (recovery_bit as u64)
+            .checked_add(chain_id.checked_mul(2).ok_or_else(|| {
+                SignerError::SigningFailed("chain_id overflow".into())
+            })?)
+            .and_then(|v| v.checked_add(35))
+            .ok_or_else(|| SignerError::SigningFailed("EIP-155 v overflow".into()))?
+            as u8;
+        Ok(sig)
+    }
+
+    /// **EIP-191**: Sign a personal message with chain-specific v value.
+    pub fn personal_sign_with_chain_id(
+        &self,
+        message: &[u8],
+        chain_id: u64,
+    ) -> Result<EthereumSignature, SignerError> {
+        let digest = eip191_hash(message);
+        self.sign_digest_with_chain_id(&digest, chain_id)
+    }
+
     /// Return the EIP-55 checksummed hex address string (e.g., `0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B`).
     pub fn address_checksum(&self) -> String {
         eip55_checksum(&self.address())

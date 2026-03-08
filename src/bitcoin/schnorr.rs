@@ -51,6 +51,12 @@ impl SchnorrSigner {
         let xonly = self.signing_key.verifying_key().to_bytes();
         super::bech32_encode("bc", 1, &xonly)
     }
+
+    /// Generate a **testnet P2TR** address (`tb1p...`).
+    pub fn p2tr_testnet_address(&self) -> Result<String, SignerError> {
+        let xonly = self.signing_key.verifying_key().to_bytes();
+        super::bech32_encode("tb", 1, &xonly)
+    }
 }
 
 impl Drop for SchnorrSigner {
