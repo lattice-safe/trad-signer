@@ -7,6 +7,7 @@
 pub mod rlp;
 pub mod transaction;
 pub mod siwe;
+pub mod abi;
 
 use crate::error::SignerError;
 use crate::traits;
@@ -187,6 +188,40 @@ impl EthereumSigner {
     /// Return the EIP-55 checksummed hex address string (e.g., `0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B`).
     pub fn address_checksum(&self) -> String {
         eip55_checksum(&self.address())
+    }
+
+    /// Create an `EthereumSigner` from a BIP-39 mnemonic phrase.
+    ///
+    /// Uses the standard Ethereum HD derivation path `m/44'/60'/0'/0/{index}`.
+    ///
+    /// # Arguments
+    /// - `phrase` — BIP-39 mnemonic words (12 or 24 words)
+    /// - `passphrase` — Optional BIP-39 passphrase (empty string for none)
+    /// - `index` — Account index (0 for the first account)
+    ///
+    /// # Example
+    /// ```no_run
+    /// use trad_signer::ethereum::EthereumSigner;
+    ///
+    /// let signer = EthereumSigner::from_mnemonic(
+    ///     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    ///     "",
+    ///     0,
+    /// ).unwrap();
+    /// println!("Address: {}", signer.address_checksum());
+    /// ```
+    pub fn from_mnemonic(phrase: &str, passphrase: &str, index: u32) -> Result<Self, SignerError> {
+        use crate::mnemonic::Mnemonic;
+        use crate::hd_key::{ExtendedPrivateKey, DerivationPath};
+        use crate::traits::KeyPair;
+
+        let mnemonic = Mnemonic::from_phrase(phrase)?;
+        let seed = mnemonic.to_seed(passphrase);
+        let master = ExtendedPrivateKey::from_seed(&*seed)?;
+        let path = DerivationPath::ethereum(index);
+        let child = master.derive_path(&path)?;
+        let private_key = child.private_key_bytes();
+        Self::from_bytes(&private_key)
     }
 }
 
