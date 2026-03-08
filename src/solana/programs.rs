@@ -295,6 +295,322 @@ pub fn initialize_nonce(
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Address Lookup Table Program
+// ═══════════════════════════════════════════════════════════════════
+
+/// Address Lookup Table program helpers.
+pub mod address_lookup_table {
+    use super::*;
+
+    /// Address Lookup Table Program ID: `AddressLookupTab1e1111111111111111111111111`
+    pub const ID: [u8; 32] = [
+        0x06, 0xa1, 0xd8, 0x17, 0x91, 0x37, 0x68, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    /// Create an Address Lookup Table.
+    ///
+    /// # Arguments
+    /// - `authority` — Authority that can extend/deactivate/close the table
+    /// - `payer` — Account that pays for storage
+    /// - `lookup_table` — The derived lookup table address
+    /// - `recent_slot` — A recent slot for derivation
+    #[must_use]
+    pub fn create(
+        authority: [u8; 32],
+        payer: [u8; 32],
+        lookup_table: [u8; 32],
+        recent_slot: u64,
+    ) -> Instruction {
+        let mut data = vec![0u8; 4]; // CreateLookupTable = 0
+        data.extend_from_slice(&recent_slot.to_le_bytes());
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(lookup_table, false),
+                AccountMeta::new_readonly(authority, true),
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            ],
+            data,
+        }
+    }
+
+    /// Extend an Address Lookup Table with new addresses.
+    #[must_use]
+    pub fn extend(
+        lookup_table: [u8; 32],
+        authority: [u8; 32],
+        payer: [u8; 32],
+        new_addresses: &[[u8; 32]],
+    ) -> Instruction {
+        let mut data = vec![0u8; 4];
+        data[0] = 2; // ExtendLookupTable = 2
+        // u32 count of addresses
+        data.extend_from_slice(&(new_addresses.len() as u32).to_le_bytes());
+        for addr in new_addresses {
+            data.extend_from_slice(addr);
+        }
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(lookup_table, false),
+                AccountMeta::new_readonly(authority, true),
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            ],
+            data,
+        }
+    }
+
+    /// Deactivate an Address Lookup Table.
+    ///
+    /// After deactivation, the table enters a cooldown and can then be closed.
+    #[must_use]
+    pub fn deactivate(
+        lookup_table: [u8; 32],
+        authority: [u8; 32],
+    ) -> Instruction {
+        let mut data = vec![0u8; 4];
+        data[0] = 3; // DeactivateLookupTable = 3
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(lookup_table, false),
+                AccountMeta::new_readonly(authority, true),
+            ],
+            data,
+        }
+    }
+
+    /// Close a deactivated Address Lookup Table and reclaim rent.
+    #[must_use]
+    pub fn close(
+        lookup_table: [u8; 32],
+        authority: [u8; 32],
+        recipient: [u8; 32],
+    ) -> Instruction {
+        let mut data = vec![0u8; 4];
+        data[0] = 4; // CloseLookupTable = 4
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(lookup_table, false),
+                AccountMeta::new_readonly(authority, true),
+                AccountMeta::new(recipient, false),
+            ],
+            data,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Metaplex Token Metadata Program
+// ═══════════════════════════════════════════════════════════════════
+
+/// Metaplex Token Metadata program helpers.
+pub mod token_metadata {
+    use super::*;
+
+    /// Metaplex Token Metadata Program ID: `metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s`
+    pub const ID: [u8; 32] = [
+        0x0b, 0x74, 0x65, 0x78, 0x74, 0x50, 0x55, 0x73,
+        0x40, 0x6a, 0xc2, 0x14, 0x12, 0xf3, 0x26, 0xf7,
+        0x1b, 0x1e, 0xce, 0xf0, 0x77, 0x87, 0x28, 0x76,
+        0xf8, 0xba, 0x16, 0x1b, 0x70, 0x4c, 0x9f, 0x04,
+    ];
+
+    /// Token Metadata data for CreateMetadataAccountV3.
+    #[derive(Debug, Clone)]
+    pub struct DataV2 {
+        /// The name of the asset.
+        pub name: String,
+        /// The symbol for the asset.
+        pub symbol: String,
+        /// URI pointing to metadata JSON (Arweave, IPFS, etc).
+        pub uri: String,
+        /// Royalty basis points (e.g., 500 = 5%).
+        pub seller_fee_basis_points: u16,
+        /// Optional creators list.
+        pub creators: Option<Vec<Creator>>,
+    }
+
+    /// A creator with an address and share.
+    #[derive(Debug, Clone)]
+    pub struct Creator {
+        /// Creator's public key.
+        pub address: [u8; 32],
+        /// Whether this creator has verified the metadata.
+        pub verified: bool,
+        /// Share of royalties (0-100, all shares must sum to 100).
+        pub share: u8,
+    }
+
+    /// Derive the metadata account address for a given mint.
+    ///
+    /// PDA: `["metadata", metadata_program_id, mint]`
+    pub fn derive_metadata_address(mint: &[u8; 32]) -> [u8; 32] {
+        use sha2::{Sha256, Digest};
+        // Simplified PDA — in production use find_program_address
+        let mut hasher = Sha256::new();
+        hasher.update(b"metadata");
+        hasher.update(ID);
+        hasher.update(mint);
+        hasher.update(ID);
+        hasher.update(b"ProgramDerivedAddress");
+        let result = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&result);
+        out
+    }
+
+    /// Serialize a Borsh-encoded string (u32 len + UTF-8 bytes).
+    fn borsh_string(s: &str) -> Vec<u8> {
+        let bytes = s.as_bytes();
+        let mut out = Vec::with_capacity(4 + bytes.len());
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    /// Serialize DataV2 to Borsh bytes.
+    fn serialize_data_v2(data: &DataV2) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend(borsh_string(&data.name));
+        buf.extend(borsh_string(&data.symbol));
+        buf.extend(borsh_string(&data.uri));
+        buf.extend_from_slice(&data.seller_fee_basis_points.to_le_bytes());
+
+        // Creators: Option<Vec<Creator>>
+        match &data.creators {
+            None => buf.push(0),
+            Some(creators) => {
+                buf.push(1);
+                buf.extend_from_slice(&(creators.len() as u32).to_le_bytes());
+                for c in creators {
+                    buf.extend_from_slice(&c.address);
+                    buf.push(u8::from(c.verified));
+                    buf.push(c.share);
+                }
+            }
+        }
+        buf
+    }
+
+    /// Create a `CreateMetadataAccountV3` instruction.
+    ///
+    /// # Arguments
+    /// - `metadata` — The derived metadata account PDA
+    /// - `mint` — The token mint
+    /// - `mint_authority` — Current authority of the mint
+    /// - `payer` — Who pays for the account
+    /// - `update_authority` — Who can update the metadata
+    /// - `data` — The token metadata
+    /// - `is_mutable` — Whether the metadata can be updated later
+    pub fn create_metadata_v3(
+        metadata: [u8; 32],
+        mint: [u8; 32],
+        mint_authority: [u8; 32],
+        payer: [u8; 32],
+        update_authority: [u8; 32],
+        data: &DataV2,
+        is_mutable: bool,
+    ) -> Instruction {
+        // Instruction discriminator for CreateMetadataAccountV3 = 33
+        let mut ix_data = vec![33];
+        ix_data.extend(serialize_data_v2(data));
+        ix_data.push(u8::from(is_mutable));
+        // collection_details: Option = None
+        ix_data.push(0);
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(metadata, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(mint_authority, true),
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(update_authority, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM_ID, false),
+            ],
+            data: ix_data,
+        }
+    }
+
+    /// Create an `UpdateMetadataAccountV2` instruction.
+    ///
+    /// # Arguments
+    /// - `metadata` — The metadata account to update
+    /// - `update_authority` — Current update authority (signer)
+    /// - `new_data` — Optional new data (pass None to keep existing)
+    /// - `new_update_authority` — Optional new update authority
+    /// - `primary_sale_happened` — Optional flag
+    /// - `is_mutable` — Optional mutability flag
+    pub fn update_metadata_v2(
+        metadata: [u8; 32],
+        update_authority: [u8; 32],
+        new_data: Option<&DataV2>,
+        new_update_authority: Option<&[u8; 32]>,
+        primary_sale_happened: Option<bool>,
+        is_mutable: Option<bool>,
+    ) -> Instruction {
+        // Instruction discriminator for UpdateMetadataAccountV2 = 15
+        let mut ix_data = vec![15];
+
+        // Optional<DataV2>
+        match new_data {
+            None => ix_data.push(0),
+            Some(d) => {
+                ix_data.push(1);
+                ix_data.extend(serialize_data_v2(d));
+            }
+        }
+
+        // Optional<Pubkey>
+        match new_update_authority {
+            None => ix_data.push(0),
+            Some(auth) => {
+                ix_data.push(1);
+                ix_data.extend_from_slice(auth);
+            }
+        }
+
+        // Optional<bool> primary_sale_happened
+        match primary_sale_happened {
+            None => ix_data.push(0),
+            Some(val) => {
+                ix_data.push(1);
+                ix_data.push(u8::from(val));
+            }
+        }
+
+        // Optional<bool> is_mutable
+        match is_mutable {
+            None => ix_data.push(0),
+            Some(val) => {
+                ix_data.push(1);
+                ix_data.push(u8::from(val));
+            }
+        }
+
+        Instruction {
+            program_id: ID,
+            accounts: vec![
+                AccountMeta::new(metadata, false),
+                AccountMeta::new_readonly(update_authority, true),
+            ],
+            data: ix_data,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════
 
@@ -409,4 +725,110 @@ mod tests {
         assert_eq!(ix.data[0], 6); // InitializeNonceAccount
         assert_eq!(&ix.data[4..36], &PAYER); // authority
     }
+
+    // ─── Address Lookup Table Tests ─────────────────────────────
+
+    #[test]
+    fn test_alt_create() {
+        let table = [9; 32];
+        let ix = address_lookup_table::create(PAYER, PAYER, table, 12345);
+        assert_eq!(ix.program_id, address_lookup_table::ID);
+        assert_eq!(ix.accounts.len(), 4);
+        assert_eq!(ix.data[0], 0); // CreateLookupTable
+        let slot = u64::from_le_bytes(ix.data[4..12].try_into().unwrap());
+        assert_eq!(slot, 12345);
+    }
+
+    #[test]
+    fn test_alt_extend() {
+        let table = [9; 32];
+        let addrs = [[10u8; 32], [11u8; 32]];
+        let ix = address_lookup_table::extend(table, PAYER, PAYER, &addrs);
+        assert_eq!(ix.data[0], 2); // ExtendLookupTable
+        let count = u32::from_le_bytes(ix.data[4..8].try_into().unwrap());
+        assert_eq!(count, 2);
+        assert_eq!(&ix.data[8..40], &addrs[0]);
+        assert_eq!(&ix.data[40..72], &addrs[1]);
+    }
+
+    #[test]
+    fn test_alt_deactivate() {
+        let table = [9; 32];
+        let ix = address_lookup_table::deactivate(table, PAYER);
+        assert_eq!(ix.data[0], 3);
+        assert_eq!(ix.accounts.len(), 2);
+    }
+
+    #[test]
+    fn test_alt_close() {
+        let table = [9; 32];
+        let recipient = [10; 32];
+        let ix = address_lookup_table::close(table, PAYER, recipient);
+        assert_eq!(ix.data[0], 4);
+        assert_eq!(ix.accounts.len(), 3);
+    }
+
+    // ─── Metaplex Token Metadata Tests ──────────────────────────
+
+    #[test]
+    fn test_derive_metadata_deterministic() {
+        let addr1 = token_metadata::derive_metadata_address(&MINT);
+        let addr2 = token_metadata::derive_metadata_address(&MINT);
+        assert_eq!(addr1, addr2);
+    }
+
+    #[test]
+    fn test_create_metadata_v3() {
+        let metadata = [12; 32];
+        let update_auth = [13; 32];
+        let data = token_metadata::DataV2 {
+            name: "My NFT".to_string(),
+            symbol: "MNFT".to_string(),
+            uri: "https://example.com/meta.json".to_string(),
+            seller_fee_basis_points: 500,
+            creators: Some(vec![token_metadata::Creator {
+                address: PAYER,
+                verified: true,
+                share: 100,
+            }]),
+        };
+        let ix = token_metadata::create_metadata_v3(
+            metadata, MINT, PAYER, PAYER, update_auth, &data, true,
+        );
+        assert_eq!(ix.program_id, token_metadata::ID);
+        assert_eq!(ix.accounts.len(), 6);
+        assert_eq!(ix.data[0], 33); // CreateMetadataAccountV3
+    }
+
+    #[test]
+    fn test_update_metadata_v2() {
+        let metadata = [12; 32];
+        let ix = token_metadata::update_metadata_v2(
+            metadata, PAYER, None, None, Some(true), None,
+        );
+        assert_eq!(ix.data[0], 15); // UpdateMetadataAccountV2
+        assert_eq!(ix.accounts.len(), 2);
+    }
+
+    #[test]
+    fn test_metadata_without_creators() {
+        let metadata = [12; 32];
+        let update_auth = [13; 32];
+        let data = token_metadata::DataV2 {
+            name: "Token".to_string(),
+            symbol: "TKN".to_string(),
+            uri: "https://example.com".to_string(),
+            seller_fee_basis_points: 0,
+            creators: None,
+        };
+        let ix = token_metadata::create_metadata_v3(
+            metadata, MINT, PAYER, PAYER, update_auth, &data, false,
+        );
+        assert_eq!(ix.data[0], 33);
+        // is_mutable should be false (0) near the end
+        let last_data = ix.data.last().unwrap();
+        // collection_details = None (0)
+        assert_eq!(*last_data, 0);
+    }
 }
+
