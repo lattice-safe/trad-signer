@@ -1,6 +1,7 @@
 //! NEO ECDSA signer using NIST P-256 (secp256r1) + SHA-256.
 
 pub mod transaction;
+pub mod witness;
 
 use crate::crypto;
 use crate::error::SignerError;

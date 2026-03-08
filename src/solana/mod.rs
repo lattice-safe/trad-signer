@@ -4,6 +4,7 @@
 //! hashes transactions before feeding them to the signer.
 
 pub mod transaction;
+pub mod programs;
 
 use crate::error::SignerError;
 use crate::traits;

@@ -11,6 +11,7 @@ pub mod psbt;
 pub mod descriptor;
 pub mod transaction;
 pub mod helpers;
+pub mod scripts;
 pub mod sighash;
 
 use crate::crypto;
