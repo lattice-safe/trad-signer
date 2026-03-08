@@ -474,3 +474,197 @@ fn parse_point(bytes: &[u8; 33]) -> Result<ProjectivePoint, SignerError> {
     #[allow(clippy::unwrap_used)]
     Ok(ProjectivePoint::from(ct.unwrap()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── Individual Pubkey ──────────────────────────────────────
+
+    #[test]
+    fn test_individual_pubkey_from_known_key() {
+        // Secret key = 1 → generator point G (compressed)
+        let sk = {
+            let mut k = [0u8; 32];
+            k[31] = 1;
+            k
+        };
+        let pk = individual_pubkey(&sk).unwrap();
+        // Generator point compressed: 02 79BE667E...
+        assert_eq!(pk[0], 0x02);
+        assert_eq!(hex::encode(&pk[1..]), "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+    }
+
+    #[test]
+    fn test_individual_pubkey_zero_key_rejected() {
+        let sk = [0u8; 32];
+        assert!(individual_pubkey(&sk).is_err());
+    }
+
+    #[test]
+    fn test_individual_pubkey_deterministic() {
+        let sk = [0x42u8; 32];
+        let pk1 = individual_pubkey(&sk).unwrap();
+        let pk2 = individual_pubkey(&sk).unwrap();
+        assert_eq!(pk1, pk2);
+    }
+
+    // ─── Key Aggregation (BIP-327 KeyAgg) ───────────────────────
+
+    #[test]
+    fn test_key_agg_two_keys() {
+        let sk1 = [0x01u8; 32];
+        let sk2 = [0x02u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+
+        let ctx = key_agg(&[pk1, pk2]).unwrap();
+        assert_eq!(ctx.x_only_pubkey.len(), 32);
+        assert_eq!(ctx.pubkeys.len(), 2);
+        assert_eq!(ctx.coefficients.len(), 2);
+    }
+
+    #[test]
+    fn test_key_agg_deterministic() {
+        let sk1 = [0x01u8; 32];
+        let sk2 = [0x02u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+
+        let ctx1 = key_agg(&[pk1, pk2]).unwrap();
+        let ctx2 = key_agg(&[pk1, pk2]).unwrap();
+        assert_eq!(ctx1.x_only_pubkey, ctx2.x_only_pubkey);
+    }
+
+    #[test]
+    fn test_key_agg_empty_rejected() {
+        assert!(key_agg(&[]).is_err());
+    }
+
+    #[test]
+    fn test_key_agg_order_matters() {
+        let sk1 = [0x01u8; 32];
+        let sk2 = [0x02u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+
+        let ctx_12 = key_agg(&[pk1, pk2]).unwrap();
+        let ctx_21 = key_agg(&[pk2, pk1]).unwrap();
+        // Different order → different aggregate key (unless sorted first)
+        // This is expected BIP-327 behavior
+        assert_ne!(ctx_12.x_only_pubkey, ctx_21.x_only_pubkey);
+    }
+
+    #[test]
+    fn test_key_sort() {
+        let sk1 = [0x01u8; 32];
+        let sk2 = [0x02u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+
+        let sorted = key_sort(&[pk2, pk1]);
+        let sorted2 = key_sort(&[pk1, pk2]);
+        assert_eq!(sorted, sorted2); // same order regardless of input
+    }
+
+    // ─── Full 2-of-2 Signing Round-Trip ─────────────────────────
+
+    #[test]
+    fn test_musig2_full_roundtrip() {
+        let sk1 = [0x11u8; 32];
+        let sk2 = [0x22u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+
+        // Key aggregation
+        let key_agg_ctx = key_agg(&[pk1, pk2]).unwrap();
+
+        // Nonce generation
+        let msg = b"musig2 test message";
+        let (sec1, pub1) = nonce_gen(&sk1, &pk1, &key_agg_ctx, msg, &[]).unwrap();
+        let (sec2, pub2) = nonce_gen(&sk2, &pk2, &key_agg_ctx, msg, &[]).unwrap();
+
+        // Nonce aggregation
+        let agg_nonce = nonce_agg(&[pub1, pub2]).unwrap();
+
+        // Partial signing
+        let psig1 = sign(sec1, &sk1, &key_agg_ctx, &agg_nonce, msg).unwrap();
+        let psig2 = sign(sec2, &sk2, &key_agg_ctx, &agg_nonce, msg).unwrap();
+
+        // Aggregate
+        let sig = partial_sig_agg(&[psig1, psig2], &agg_nonce, &key_agg_ctx, msg).unwrap();
+        assert_eq!(sig.to_bytes().len(), 64);
+
+        // BIP-340 verification
+        let valid = verify(&sig, &key_agg_ctx.x_only_pubkey, msg).unwrap();
+        assert!(valid, "MuSig2 signature must verify");
+    }
+
+    #[test]
+    fn test_musig2_different_messages_different_sigs() {
+        let sk1 = [0x11u8; 32];
+        let sk2 = [0x22u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+        let ctx = key_agg(&[pk1, pk2]).unwrap();
+
+        let msg1 = b"message one";
+        let msg2 = b"message two";
+
+        let (s1a, p1a) = nonce_gen(&sk1, &pk1, &ctx, msg1, &[]).unwrap();
+        let (s2a, p2a) = nonce_gen(&sk2, &pk2, &ctx, msg1, &[]).unwrap();
+        let an_a = nonce_agg(&[p1a, p2a]).unwrap();
+        let ps1a = sign(s1a, &sk1, &ctx, &an_a, msg1).unwrap();
+        let ps2a = sign(s2a, &sk2, &ctx, &an_a, msg1).unwrap();
+        let sig1 = partial_sig_agg(&[ps1a, ps2a], &an_a, &ctx, msg1).unwrap();
+
+        let (s1b, p1b) = nonce_gen(&sk1, &pk1, &ctx, msg2, &[]).unwrap();
+        let (s2b, p2b) = nonce_gen(&sk2, &pk2, &ctx, msg2, &[]).unwrap();
+        let an_b = nonce_agg(&[p1b, p2b]).unwrap();
+        let ps1b = sign(s1b, &sk1, &ctx, &an_b, msg2).unwrap();
+        let ps2b = sign(s2b, &sk2, &ctx, &an_b, msg2).unwrap();
+        let sig2 = partial_sig_agg(&[ps1b, ps2b], &an_b, &ctx, msg2).unwrap();
+
+        // Different messages → different signatures
+        assert_ne!(sig1.to_bytes(), sig2.to_bytes());
+    }
+
+    #[test]
+    fn test_musig2_wrong_message_fails_verification() {
+        let sk1 = [0x11u8; 32];
+        let sk2 = [0x22u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+        let ctx = key_agg(&[pk1, pk2]).unwrap();
+
+        let msg = b"correct message";
+        let (s1, p1) = nonce_gen(&sk1, &pk1, &ctx, msg, &[]).unwrap();
+        let (s2, p2) = nonce_gen(&sk2, &pk2, &ctx, msg, &[]).unwrap();
+        let an = nonce_agg(&[p1, p2]).unwrap();
+        let ps1 = sign(s1, &sk1, &ctx, &an, msg).unwrap();
+        let ps2 = sign(s2, &sk2, &ctx, &an, msg).unwrap();
+        let sig = partial_sig_agg(&[ps1, ps2], &an, &ctx, msg).unwrap();
+
+        // Verify with wrong message
+        let valid = verify(&sig, &ctx.x_only_pubkey, b"wrong message").unwrap();
+        assert!(!valid, "signature must not verify for wrong message");
+    }
+
+    #[test]
+    fn test_nonce_agg_empty_rejected() {
+        assert!(nonce_agg(&[]).is_err());
+    }
+
+    #[test]
+    fn test_partial_sig_agg_empty_rejected() {
+        let sk1 = [0x11u8; 32];
+        let sk2 = [0x22u8; 32];
+        let pk1 = individual_pubkey(&sk1).unwrap();
+        let pk2 = individual_pubkey(&sk2).unwrap();
+        let ctx = key_agg(&[pk1, pk2]).unwrap();
+        let (_, p1) = nonce_gen(&sk1, &pk1, &ctx, b"x", &[]).unwrap();
+        let (_, p2) = nonce_gen(&sk2, &pk2, &ctx, b"x", &[]).unwrap();
+        let an = nonce_agg(&[p1, p2]).unwrap();
+        assert!(partial_sig_agg(&[], &an, &ctx, b"x").is_err());
+    }
+}

@@ -573,4 +573,116 @@ mod tests {
         assert_ne!(&*eth0.private_key_bytes(), &*eth1.private_key_bytes());
         assert_ne!(&*eth0.private_key_bytes(), &*btc0.private_key_bytes());
     }
+
+    // ─── BIP-32 Vector 1: xprv/xpub Serialization ───────────────
+
+    #[test]
+    fn test_bip32_vector1_master_xprv() {
+        // BIP-32 Test Vector 1 — Master key xprv
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        assert_eq!(
+            master.to_xprv(),
+            "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+        );
+    }
+
+    #[test]
+    fn test_bip32_vector1_master_xpub() {
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        assert_eq!(
+            master.to_xpub().unwrap(),
+            "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8"
+        );
+    }
+
+    #[test]
+    fn test_bip32_vector1_chain_m_0h() {
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        let child = master.derive_child(0, true).unwrap();
+        assert_eq!(
+            child.to_xprv(),
+            "xprv9uHRZZhk6KAJC1avXpDAp4MDc3sQKNxDiPvvkX8Br5ngLNv1TxvUxt4cV1rGL5hj6KCesnDYUhd7oWgT11eZG7XnxHrnYeSvkzY7d2bhkJ7"
+        );
+        assert_eq!(
+            child.to_xpub().unwrap(),
+            "xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw"
+        );
+    }
+
+    #[test]
+    fn test_bip32_xprv_roundtrip() {
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        let xprv_str = master.to_xprv();
+        let restored = ExtendedPrivateKey::from_xprv(&xprv_str).unwrap();
+        assert_eq!(&*master.private_key_bytes(), &*restored.private_key_bytes());
+        assert_eq!(master.chain_code(), restored.chain_code());
+        assert_eq!(master.depth(), restored.depth());
+    }
+
+    #[test]
+    fn test_bip32_from_xprv_invalid_checksum() {
+        // Valid xprv but flip last character to break checksum
+        let xprv = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHiX";
+        // This should fail because the checksum is invalid (we appended 'X')
+        // But the base58 decoding may also fail since length changes
+        assert!(ExtendedPrivateKey::from_xprv(xprv).is_err());
+    }
+
+    // ─── BIP-32 Vector 2: Full chain ────────────────────────────
+
+    #[test]
+    fn test_bip32_vector2_master_xprv() {
+        let seed = hex::decode(
+            "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542"
+        ).unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        assert_eq!(
+            master.to_xprv(),
+            "xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U"
+        );
+    }
+
+    #[test]
+    fn test_bip32_vector2_chain_m_0() {
+        let seed = hex::decode(
+            "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542"
+        ).unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+        let child = master.derive_child(0, false).unwrap();
+        assert_eq!(
+            child.to_xprv(),
+            "xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt"
+        );
+    }
+
+    // ─── Derivation Path Edge Cases ─────────────────────────────
+
+    #[test]
+    fn test_derivation_path_hardened_h_notation() {
+        let path = DerivationPath::parse("m/44h/60h/0h/0/0").unwrap();
+        assert_eq!(path.steps.len(), 5);
+        assert!(path.steps[0].hardened);
+        assert_eq!(path.steps[0].index, 44);
+    }
+
+    #[test]
+    fn test_derivation_path_all_chain_presets() {
+        let btc_segwit = DerivationPath::bitcoin_segwit(0);
+        assert_eq!(btc_segwit.steps[0].index, 84); // BIP-84
+        assert!(btc_segwit.steps[0].hardened);
+
+        let btc_taproot = DerivationPath::bitcoin_taproot(0);
+        assert_eq!(btc_taproot.steps[0].index, 86); // BIP-86
+        assert!(btc_taproot.steps[0].hardened);
+
+        let xrp = DerivationPath::xrp(0);
+        assert_eq!(xrp.steps[1].index, 144); // XRP coin type
+
+        let neo = DerivationPath::neo(0);
+        assert_eq!(neo.steps[1].index, 888); // NEO coin type
+    }
 }

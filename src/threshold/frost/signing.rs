@@ -503,3 +503,155 @@ pub fn verify_share(
 
     Ok(lhs == rhs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::threshold::frost::keygen;
+
+    fn setup_2_of_3() -> (keygen::KeyGenOutput, AffinePoint) {
+        let secret = [0x42u8; 32];
+        let output = keygen::trusted_dealer_keygen(&secret, 2, 3).unwrap();
+        let group_pk = output.group_public_key;
+        (output, group_pk)
+    }
+
+    // ─── Full 2-of-3 Round-Trip ────────────────────────────────
+
+    #[test]
+    fn test_frost_2_of_3_roundtrip() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"frost threshold message";
+
+        // Round 1: participants 1 and 2 commit
+        let nonce1 = commit(&kgen.key_packages[0]).unwrap();
+        let nonce2 = commit(&kgen.key_packages[1]).unwrap();
+        let commitments = vec![nonce1.commitments.clone(), nonce2.commitments.clone()];
+
+        // Round 2: each signs
+        let share1 = sign(&kgen.key_packages[0], nonce1, &commitments, msg).unwrap();
+        let share2 = sign(&kgen.key_packages[1], nonce2, &commitments, msg).unwrap();
+
+        // Aggregate
+        let sig = aggregate(&commitments, &[share1, share2], &group_pk, msg).unwrap();
+        assert_eq!(sig.to_bytes().len(), 65); // 33 (R) + 32 (s)
+
+        // Verify
+        let valid = verify(&sig, &group_pk, msg).unwrap();
+        assert!(valid, "FROST 2-of-3 signature must verify");
+    }
+
+    // ─── Different Signer Subsets ────────────────────────────────
+
+    #[test]
+    fn test_frost_different_participant_subsets() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"subset test";
+
+        // Subset {1, 3}
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n3 = commit(&kgen.key_packages[2]).unwrap();
+        let comms = vec![n1.commitments.clone(), n3.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+        let s3 = sign(&kgen.key_packages[2], n3, &comms, msg).unwrap();
+        let sig = aggregate(&comms, &[s1, s3], &group_pk, msg).unwrap();
+        assert!(verify(&sig, &group_pk, msg).unwrap(), "subset {{1,3}} must verify");
+    }
+
+    // ─── Share Verification (Identifiable Abort) ────────────────
+
+    #[test]
+    fn test_frost_verify_share() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"share verify test";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n2 = commit(&kgen.key_packages[1]).unwrap();
+        let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+
+        // Verify participant 1's share
+        let pk1 = kgen.key_packages[0].public_key();
+        let valid = verify_share(&s1, &comms[0], &pk1, &group_pk, &comms, msg).unwrap();
+        assert!(valid, "valid share must verify");
+    }
+
+    // ─── Wrong Message Fails ────────────────────────────────────
+
+    #[test]
+    fn test_frost_wrong_message_fails() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"correct msg";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n2 = commit(&kgen.key_packages[1]).unwrap();
+        let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+        let s2 = sign(&kgen.key_packages[1], n2, &comms, msg).unwrap();
+        let sig = aggregate(&comms, &[s1, s2], &group_pk, msg).unwrap();
+
+        let wrong = verify(&sig, &group_pk, b"wrong msg").unwrap();
+        assert!(!wrong, "wrong message must fail verification");
+    }
+
+    // ─── Different Messages → Different Signatures ──────────────
+
+    #[test]
+    fn test_frost_different_messages_different_sigs() {
+        let (kgen, group_pk) = setup_2_of_3();
+
+        let make_sig = |m: &[u8]| -> Vec<u8> {
+            let n1 = commit(&kgen.key_packages[0]).unwrap();
+            let n2 = commit(&kgen.key_packages[1]).unwrap();
+            let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+            let s1 = sign(&kgen.key_packages[0], n1, &comms, m).unwrap();
+            let s2 = sign(&kgen.key_packages[1], n2, &comms, m).unwrap();
+            aggregate(&comms, &[s1, s2], &group_pk, m).unwrap().to_bytes()
+        };
+
+        let sig_a = make_sig(b"message A");
+        let sig_b = make_sig(b"message B");
+        assert_ne!(sig_a, sig_b);
+    }
+
+    // ─── VSS Commitment Verification ────────────────────────────
+
+    #[test]
+    fn test_frost_vss_commitments_verify() {
+        let (kgen, _) = setup_2_of_3();
+        for pkg in &kgen.key_packages {
+            assert!(
+                kgen.vss_commitments.verify_share(pkg.identifier, pkg.secret_share()),
+                "VSS share must verify for participant {}", pkg.identifier
+            );
+        }
+    }
+
+    // ─── Aggregate Rejects Insufficient Shares ──────────────────
+
+    #[test]
+    fn test_frost_aggregate_rejects_single_share() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"need 2";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let comms = vec![n1.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+
+        // Only 1 share — must fail (need at least t=2)
+        assert!(aggregate(&comms, &[s1], &group_pk, msg).is_err());
+    }
+
+    // ─── Deterministic Key Generation ───────────────────────────
+
+    #[test]
+    fn test_frost_keygen_deterministic() {
+        let secret = [0x42u8; 32];
+        let out1 = keygen::trusted_dealer_keygen(&secret, 2, 3).unwrap();
+        let out2 = keygen::trusted_dealer_keygen(&secret, 2, 3).unwrap();
+        assert_eq!(
+            out1.group_public_key.to_encoded_point(true).as_bytes(),
+            out2.group_public_key.to_encoded_point(true).as_bytes()
+        );
+    }
+}
