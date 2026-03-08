@@ -84,8 +84,11 @@ pub trait KeyPair: Signer {
     /// Export the full keypair as `private_key ∥ public_key`.
     /// Default: 32B seed + compressed pubkey.
     fn keypair_bytes(&self) -> Zeroizing<Vec<u8>> {
-        let mut kp = self.private_key_bytes().to_vec();
-        kp.extend_from_slice(&self.public_key_bytes());
+        let priv_key = self.private_key_bytes();
+        let pub_key = self.public_key_bytes();
+        let mut kp = Vec::with_capacity(priv_key.len() + pub_key.len());
+        kp.extend_from_slice(&priv_key);
+        kp.extend_from_slice(&pub_key);
         Zeroizing::new(kp)
     }
 }

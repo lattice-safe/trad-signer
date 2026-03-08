@@ -14,8 +14,9 @@ use sha2::{Digest, Sha512};
 use zeroize::Zeroizing;
 
 /// A Solana Ed25519 signature (64 bytes).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct SolanaSignature {
     /// The 64-byte Ed25519 signature.
     #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
@@ -39,6 +40,15 @@ impl SolanaSignature {
         let mut out = [0u8; 64];
         out.copy_from_slice(bytes);
         Ok(Self { bytes: out })
+    }
+}
+
+impl core::fmt::Display for SolanaSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for byte in &self.bytes {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -110,7 +120,9 @@ impl traits::Signer for SolanaSigner {
 
 impl traits::KeyPair for SolanaSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
         Ok(Self { signing_key })
     }
 

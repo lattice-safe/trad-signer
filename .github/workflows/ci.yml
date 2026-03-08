@@ -32,18 +32,67 @@ jobs:
       - name: Test (no default features)
         run: cargo test --no-default-features
 
+  msrv:
+    name: MSRV (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75
+      - name: Check MSRV
+        run: cargo check --all-features
+
   features:
     name: Feature isolation (${{ matrix.feature }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        feature: [ethereum, bitcoin, neo, xrp, solana, bls]
+        feature:
+          - ethereum
+          - bitcoin
+          - neo
+          - xrp
+          - solana
+          - bls
+          - frost
+          - musig2
+          - hd_key
+          - mnemonic
+          - bip85
+          - serde
+          - custom_rng
+          - mlock
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Test --features ${{ matrix.feature }}
         run: cargo test --no-default-features --features ${{ matrix.feature }}
+
+  wasm:
+    name: WASM compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Check WASM (no default features)
+        run: cargo check --target wasm32-unknown-unknown --no-default-features
+
+  fuzz:
+    name: Fuzz (short run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz all targets (10s each)
+        run: |
+          for target in $(cargo fuzz list); do
+            echo "Fuzzing $target..."
+            cargo fuzz run "$target" -- -max_total_time=10
+          done
 
   security:
     name: Dependency audit

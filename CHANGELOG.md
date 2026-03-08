@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.0] — 2026-03-09
+
+### Added
+- **SECURITY.md**: Vulnerability reporting policy and security model documentation
+- **CONTRIBUTING.md**: Contributor guide with code quality and security standards
+- **Display for signature types**: `BitcoinSignature`, `EthereumSignature`, `SolanaSignature` now implement `Display` (hex-formatted output)
+- **Branchless constant-time hex**: `ct_hex_val` rewritten with arithmetic masks (no data-dependent branches)
+
+### Fixed
+- **CLI feature gates**: All chain references in `chains_sdk` binary are now `#[cfg(feature = "...")]` gated — `--no-default-features` compiles correctly
+- **`missing_docs`**: Elevated from `warn` to `deny` — all public items must be documented
+- **Ignored doc-tests**: Converted `set_custom_rng` and `EnclaveContext` examples from `ignore` to `no_run`
+- **Unsafe safety docs**: Added `// SAFETY:` comments to all `#[allow(unsafe_code)]` blocks in `mlock`
+- **Custom RNG**: Replaced `thread_local!` with `OnceLock`-based global — works correctly in multi-threaded enclave environments
+
+### Changed
+- **CI hardening**: Added MSRV (1.75) check, WASM compilation check, fuzz CI job, and expanded feature matrix to cover `frost`, `musig2`, `hd_key`, `mnemonic`, `bip85`, `serde`, `custom_rng`, `mlock`
+
+## [0.6.0] — 2026-03-08
+
+### Added
+- **Enclave security module**: `security.rs` with `GuardedMemory`, `ct_hex_encode`, `ct_hex_decode`, `secure_random`, `rotate_key`, `EnclaveContext` trait
+- **Pluggable RNG**: `set_custom_rng()` / `clear_custom_rng()` for TEE environments (requires `custom_rng` feature)
+- **Memory locking**: `mlock` feature for preventing sensitive data from being swapped to disk
+- **BLS threshold signatures**: `bls::threshold` module with t-of-n keygen and signing
+- **EIP-2333/2334/2335**: BLS key derivation and keystore support
+- **Serde support**: Optional `serde` feature for key and signature serialization
+
 ## [0.5.0] — 2026-03-08
 
 ### ⚠ Breaking Changes

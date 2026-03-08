@@ -26,36 +26,58 @@ pub fn ct_hex_encode(data: &[u8]) -> String {
 /// Constant-time hex decoding for secret material.
 ///
 /// Returns `None` if the input contains non-hex characters or has odd length.
+/// Processes the full input regardless of validity to avoid timing leaks.
 #[must_use]
 pub fn ct_hex_decode(hex: &str) -> Option<Vec<u8>> {
     let bytes = hex.as_bytes();
-    if bytes.len() % 2 != 0 {
-        return None;
-    }
-    let mut result = Vec::with_capacity(bytes.len() / 2);
+    // Process all bytes even if odd-length — avoid early return timing leak
+    let odd = bytes.len() % 2;
+    let pair_count = bytes.len() / 2;
+    let mut result = Vec::with_capacity(pair_count);
+    let mut all_valid: u8 = 0xFF;
+
     for chunk in bytes.chunks(2) {
-        let high = ct_hex_val(chunk[0])?;
-        let low = ct_hex_val(chunk[1])?;
-        result.push((high << 4) | low);
+        if chunk.len() == 2 {
+            let (high, h_ok) = ct_hex_val(chunk[0]);
+            let (low, l_ok) = ct_hex_val(chunk[1]);
+            all_valid &= h_ok & l_ok;
+            result.push((high << 4) | low);
+        }
     }
-    Some(result)
+
+    // Reject odd-length inputs via the flag, not an early return
+    if odd != 0 {
+        all_valid = 0;
+    }
+
+    if all_valid != 0 {
+        Some(result)
+    } else {
+        None
+    }
 }
 
-/// Constant-time hex character to value.
-fn ct_hex_val(c: u8) -> Option<u8> {
+/// Fully constant-time hex character to value (branchless).
+///
+/// Returns `(value, validity_mask)` where `validity_mask` is `0xFF` if the
+/// character is valid hex and `0x00` otherwise. No branches on data.
+fn ct_hex_val(c: u8) -> (u8, u8) {
+    // Compute all three candidate values unconditionally
     let digit = c.wrapping_sub(b'0');
     let upper = c.wrapping_sub(b'A').wrapping_add(10);
     let lower = c.wrapping_sub(b'a').wrapping_add(10);
 
-    if digit < 10 {
-        Some(digit)
-    } else if upper < 16 {
-        Some(upper)
-    } else if lower < 16 {
-        Some(lower)
-    } else {
-        None
-    }
+    // Create validity masks (0xFF if valid, 0x00 if not) — branchless
+    let digit_valid = ((digit as i8).wrapping_sub(10) >> 7) as u8; // 0xFF if digit < 10
+    let upper_valid = ((upper.wrapping_sub(10) as i8).wrapping_sub(6) >> 7) as u8 & !digit_valid;
+    let lower_valid =
+        ((lower.wrapping_sub(10) as i8).wrapping_sub(6) >> 7) as u8 & !digit_valid & !upper_valid;
+
+    // Select result using masks — no branches on data
+    let result = (digit & digit_valid) | (upper & upper_valid) | (lower & lower_valid);
+    let any_valid = digit_valid | upper_valid | lower_valid;
+
+    (result, any_valid)
 }
 
 // ─── Secure Zero ───────────────────────────────────────────────────
@@ -131,7 +153,10 @@ impl AsMut<[u8]> for GuardedMemory {
 impl Drop for GuardedMemory {
     #[allow(unsafe_code)]
     fn drop(&mut self) {
-        // Unlock memory before zeroization (Zeroizing handles the zeroing)
+        // Unlock memory before zeroization (Zeroizing handles the zeroing).
+        // SAFETY: `self.inner` is a valid, heap-allocated `Vec<u8>` that was
+        // locked via `lock_memory` in `new()` / `from_vec()`. The pointer and
+        // length are guaranteed valid for the lifetime of this struct.
         #[cfg(feature = "mlock")]
         unlock_memory(self.inner.as_ptr(), self.inner.len());
     }
@@ -170,8 +195,11 @@ impl core::fmt::Debug for GuardedMemory {
 #[allow(unsafe_code)]
 fn lock_memory(ptr: *const u8, len: usize) {
     if len > 0 {
-        // Safety: ptr points to a valid allocated region of len bytes.
-        // mlock is always safe to call on valid memory.
+        // SAFETY: `ptr` points to a valid, heap-allocated region of at least
+        // `len` bytes owned by a `Zeroizing<Vec<u8>>`. The `mlock(2)` syscall
+        // is always safe to call on valid memory — it only advises the kernel
+        // to keep the pages resident. Errors (e.g., RLIMIT_MEMLOCK exceeded)
+        // are silently ignored as this is best-effort security.
         unsafe { libc::mlock(ptr.cast(), len) };
     }
 }
@@ -181,6 +209,9 @@ fn lock_memory(ptr: *const u8, len: usize) {
 #[allow(unsafe_code)]
 fn unlock_memory(ptr: *const u8, len: usize) {
     if len > 0 {
+        // SAFETY: `ptr` was previously passed to `lock_memory` and points to
+        // a valid heap allocation of at least `len` bytes. `munlock(2)` is
+        // always safe on valid memory and simply reverses the `mlock` advisory.
         unsafe { libc::munlock(ptr.cast(), len) };
     }
 }
@@ -204,27 +235,25 @@ pub fn secure_random(buf: &mut [u8]) -> Result<(), crate::error::SignerError> {
 
     #[cfg(feature = "custom_rng")]
     {
-        CUSTOM_RNG.with(|rng| {
-            if let Some(f) = rng.borrow().as_ref() {
-                f(buf)
-            } else {
-                getrandom::getrandom(buf).map_err(|e| {
-                    crate::error::SignerError::SigningFailed(format!("RNG failed: {e}"))
-                })
-            }
-        })
+        if let Some(f) = CUSTOM_RNG.get() {
+            f(buf)
+        } else {
+            getrandom::getrandom(buf).map_err(|e| {
+                crate::error::SignerError::SigningFailed(format!("RNG failed: {e}"))
+            })
+        }
     }
 }
 
 /// Custom RNG function type for TEE environments.
+///
+/// Must be `Send + Sync` for use in multi-threaded enclave environments.
 #[cfg(feature = "custom_rng")]
-pub type CustomRngFn = Box<dyn Fn(&mut [u8]) -> Result<(), crate::error::SignerError>>;
+pub type CustomRngFn =
+    Box<dyn Fn(&mut [u8]) -> Result<(), crate::error::SignerError> + Send + Sync>;
 
 #[cfg(feature = "custom_rng")]
-std::thread_local! {
-    static CUSTOM_RNG: std::cell::RefCell<Option<CustomRngFn>> =
-        const { std::cell::RefCell::new(None) };
-}
+static CUSTOM_RNG: std::sync::OnceLock<CustomRngFn> = std::sync::OnceLock::new();
 
 /// Set a custom RNG source for enclave environments.
 ///
@@ -232,27 +261,21 @@ std::thread_local! {
 /// function, typically backed by a hardware TRNG (e.g., RDRAND/RDSEED
 /// in SGX, or Nitro's `/dev/nsm`).
 ///
+/// This is a global, process-wide setting. It can only be set **once**;
+/// subsequent calls are silently ignored (the first RNG wins).
+///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// # #[cfg(feature = "custom_rng")]
 /// chains_sdk::security::set_custom_rng(Box::new(|buf| {
 ///     // Fill from hardware TRNG
-///     my_enclave_trng_fill(buf);
+///     // my_enclave_trng_fill(buf);
 ///     Ok(())
 /// }));
 /// ```
 #[cfg(feature = "custom_rng")]
 pub fn set_custom_rng(f: CustomRngFn) {
-    CUSTOM_RNG.with(|rng| {
-        *rng.borrow_mut() = Some(f);
-    });
-}
-
-/// Clear the custom RNG source, reverting to `getrandom`.
-#[cfg(feature = "custom_rng")]
-pub fn clear_custom_rng() {
-    CUSTOM_RNG.with(|rng| {
-        *rng.borrow_mut() = None;
-    });
+    let _ = CUSTOM_RNG.set(f);
 }
 
 // ─── Attestation Hooks ─────────────────────────────────────────────
@@ -264,17 +287,20 @@ pub fn clear_custom_rng() {
 /// TDX reports, etc.).
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// use chains_sdk::security::EnclaveContext;
+/// use chains_sdk::error::SignerError;
+///
 /// struct NitroEnclave;
 ///
 /// impl EnclaveContext for NitroEnclave {
-///     fn attest(&self, user_data: &[u8]) -> Result<Vec<u8>, SignerError> {
+///     fn attest(&self, _user_data: &[u8]) -> Result<Vec<u8>, SignerError> {
 ///         // Call /dev/nsm to generate attestation document
-///         nsm_attest(user_data)
+///         Ok(vec![]) // placeholder
 ///     }
-///     fn verify_attestation(&self, doc: &[u8]) -> Result<bool, SignerError> {
+///     fn verify_attestation(&self, _doc: &[u8]) -> Result<bool, SignerError> {
 ///         // Verify attestation signature chain
-///         nsm_verify(doc)
+///         Ok(true) // placeholder
 ///     }
 /// }
 /// ```

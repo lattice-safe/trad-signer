@@ -17,10 +17,9 @@ mod eip155 {
     fn test_eip155_polygon_v_value() {
         let signer = EthereumSigner::generate().unwrap();
         let sig = signer.sign_with_chain_id(b"test", 137).unwrap();
-        // v = 35 + 137*2 + {0,1} = 309 or 310 (truncated to u8 for small chains)
-        // For chain_id > 109, v overflows u8 — this tests the math
-        let expected_v_0 = (35u64 + 137 * 2) as u8;
-        let expected_v_1 = (35u64 + 137 * 2 + 1) as u8;
+        // v = 35 + 137*2 + {0,1} = 309 or 310
+        let expected_v_0: u64 = 35 + 137 * 2;
+        let expected_v_1: u64 = 35 + 137 * 2 + 1;
         assert!(sig.v == expected_v_0 || sig.v == expected_v_1);
     }
 

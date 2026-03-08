@@ -125,45 +125,11 @@ pub fn derive_bip39(
 }
 
 /// Convert raw entropy bytes to a BIP-39 mnemonic phrase.
+///
+/// Delegates to `Mnemonic::from_entropy` to avoid code duplication.
 fn entropy_to_mnemonic(entropy: &[u8]) -> Result<String, SignerError> {
-    let wordlist = include_str!("bip39_english.txt");
-    let words: Vec<&str> = wordlist.lines().collect();
-    if words.len() != 2048 {
-        return Err(SignerError::InvalidPrivateKey(
-            "invalid BIP-39 wordlist".into(),
-        ));
-    }
-
-    // Compute checksum: first (entropy_bits / 32) bits of SHA256(entropy)
-    let checksum_hash = crypto::sha256(entropy);
-    let entropy_bits = entropy.len() * 8;
-    let checksum_bits = entropy_bits / 32;
-
-    // Concatenate entropy bits + checksum bits
-    let mut bit_vec: Vec<bool> = Vec::with_capacity(entropy_bits + checksum_bits);
-    for byte in entropy {
-        for j in (0..8).rev() {
-            bit_vec.push((byte >> j) & 1 == 1);
-        }
-    }
-    for j in 0..checksum_bits {
-        bit_vec.push((checksum_hash[j / 8] >> (7 - (j % 8))) & 1 == 1);
-    }
-
-    // Split into 11-bit groups
-    let total_words = (entropy_bits + checksum_bits) / 11;
-    let mut mnemonic_words = Vec::with_capacity(total_words);
-    for i in 0..total_words {
-        let mut idx: u16 = 0;
-        for j in 0..11 {
-            if bit_vec[i * 11 + j] {
-                idx |= 1 << (10 - j);
-            }
-        }
-        mnemonic_words.push(words[idx as usize]);
-    }
-
-    Ok(mnemonic_words.join(" "))
+    let m = crate::mnemonic::Mnemonic::from_entropy(entropy)?;
+    Ok(m.phrase().to_string())
 }
 
 // ─── Application 2: WIF (Wallet Import Format) ─────────────────────

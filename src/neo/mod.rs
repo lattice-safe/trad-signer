@@ -12,12 +12,23 @@ use p256::ecdsa::{Signature as P256Signature, SigningKey, VerifyingKey};
 use zeroize::Zeroizing;
 
 /// A NEO ECDSA signature (64 bytes, r || s).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct NeoSignature {
     /// 64 bytes: r (32) || s (32).
     #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 64],
+}
+
+impl core::fmt::Display for NeoSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x")?;
+        for byte in &self.bytes {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 impl NeoSignature {
@@ -87,8 +98,9 @@ pub fn validate_address(address: &str) -> bool {
     if decoded.len() != 25 || decoded[0] != 0x17 {
         return false;
     }
+    use subtle::ConstantTimeEq;
     let checksum = crypto::double_sha256(&decoded[..21]);
-    decoded[21..25] == checksum[..4]
+    checksum[..4].ct_eq(&decoded[21..25]).unwrap_u8() == 1
 }
 
 impl NeoSigner {
@@ -208,7 +220,10 @@ impl traits::Signer for NeoSigner {
 
 impl traits::KeyPair for NeoSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = SigningKey::from_bytes((&*key_bytes).into())
+            .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
         Ok(Self { signing_key })
     }
 

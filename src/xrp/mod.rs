@@ -12,11 +12,22 @@ use sha2::{Digest, Sha512};
 use zeroize::Zeroizing;
 
 /// XRP signature (variable format depending on key type).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct XrpSignature {
     /// DER-encoded for ECDSA, 64-byte for Ed25519.
     pub bytes: Vec<u8>,
+}
+
+impl core::fmt::Display for XrpSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x")?;
+        for byte in &self.bytes {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 impl XrpSignature {
@@ -106,8 +117,9 @@ pub fn validate_address(address: &str) -> bool {
     if decoded.len() != 25 || decoded[0] != 0x00 {
         return false;
     }
+    use subtle::ConstantTimeEq;
     let checksum = crypto::double_sha256(&decoded[..21]);
-    decoded[21..25] == checksum[..4]
+    checksum[..4].ct_eq(&decoded[21..25]).unwrap_u8() == 1
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -284,8 +296,10 @@ impl traits::Signer for XrpEcdsaSigner {
 
 impl traits::KeyPair for XrpEcdsaSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key =
-            k256::ecdsa::SigningKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = k256::ecdsa::SigningKey::from_bytes((&*key_bytes).into())
+            .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
         Ok(Self { signing_key })
     }
 
@@ -413,7 +427,9 @@ impl traits::Signer for XrpEddsaSigner {
 
 impl traits::KeyPair for XrpEddsaSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
         Ok(Self { signing_key })
     }
 

@@ -17,12 +17,23 @@ use zeroize::Zeroizing;
 pub const ETH2_DST: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_";
 
 /// A BLS12-381 signature (96 bytes, G2 point).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct BlsSignature {
     /// The 96-byte compressed G2 signature.
     #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 96],
+}
+
+impl core::fmt::Display for BlsSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x")?;
+        for byte in &self.bytes {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 impl BlsSignature {
@@ -46,7 +57,7 @@ impl BlsSignature {
 }
 
 /// A BLS12-381 public key (48 bytes, G1 point).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlsPublicKey {
     /// The 48-byte compressed G1 public key.

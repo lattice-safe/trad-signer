@@ -24,8 +24,9 @@ use k256::ecdsa::{Signature as K256Signature, SigningKey, VerifyingKey};
 use zeroize::Zeroizing;
 
 /// A Bitcoin ECDSA signature in DER encoding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct BitcoinSignature {
     /// DER-encoded signature bytes (private to prevent mutation).
     der_bytes: Vec<u8>,
@@ -51,6 +52,15 @@ impl BitcoinSignature {
         Ok(Self {
             der_bytes: der.to_vec(),
         })
+    }
+}
+
+impl core::fmt::Display for BitcoinSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for byte in &self.der_bytes {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -330,7 +340,10 @@ impl traits::Signer for BitcoinSigner {
 
 impl traits::KeyPair for BitcoinSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = SigningKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = SigningKey::from_bytes((&*key_bytes).into())
+            .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
         Ok(Self { signing_key })
     }
 

@@ -12,8 +12,9 @@ use k256::schnorr::{
 use zeroize::Zeroizing;
 
 /// A BIP-340 Schnorr signature (64 bytes).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct SchnorrSignature {
     /// The 64-byte signature.
     #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
@@ -99,7 +100,10 @@ impl traits::Signer for SchnorrSigner {
 
 impl traits::KeyPair for SchnorrSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = SchnorrSigningKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = SchnorrSigningKey::from_bytes(&*key_bytes)
+            .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
         Ok(Self { signing_key })
     }
 

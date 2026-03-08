@@ -193,7 +193,7 @@ impl EIP2930Transaction {
         items.extend_from_slice(&rlp::encode_u128(self.value));
         items.extend_from_slice(&rlp::encode_bytes(&self.data));
         items.extend_from_slice(&rlp::encode_access_list(&self.access_list));
-        items.extend_from_slice(&rlp::encode_u64(y_parity as u64));
+        items.extend_from_slice(&rlp::encode_u64(y_parity));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.r)));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.s)));
 
@@ -267,7 +267,7 @@ impl EIP1559Transaction {
         items.extend_from_slice(&rlp::encode_u128(self.value));
         items.extend_from_slice(&rlp::encode_bytes(&self.data));
         items.extend_from_slice(&rlp::encode_access_list(&self.access_list));
-        items.extend_from_slice(&rlp::encode_u64(y_parity as u64));
+        items.extend_from_slice(&rlp::encode_u64(y_parity));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.r)));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.s)));
 
@@ -359,7 +359,7 @@ impl EIP4844Transaction {
             hash_items.extend_from_slice(&rlp::encode_bytes(h));
         }
         items.extend_from_slice(&rlp::encode_list(&hash_items));
-        items.extend_from_slice(&rlp::encode_u64(y_parity as u64));
+        items.extend_from_slice(&rlp::encode_u64(y_parity));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.r)));
         items.extend_from_slice(&rlp::encode_bytes(&strip_leading_zeros(&sig.s)));
 

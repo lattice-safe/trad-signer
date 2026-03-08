@@ -124,10 +124,10 @@ impl Mnemonic {
             )));
         }
 
-        // Convert words to indices
+        // Convert words to indices via binary search (wordlist is sorted)
         let mut indices = Vec::with_capacity(word_count);
         for word in &words {
-            let idx = wordlist.iter().position(|w| w == word).ok_or_else(|| {
+            let idx = wordlist.binary_search_by(|w| w.cmp(word)).map_err(|_| {
                 SignerError::InvalidPrivateKey(format!("unknown BIP-39 word: {word}"))
             })?;
             indices.push(idx as u32);
@@ -174,7 +174,8 @@ impl Mnemonic {
     ///
     /// The passphrase is optional (use `""` for no passphrase).
     pub fn to_seed(&self, passphrase: &str) -> Zeroizing<[u8; 64]> {
-        let salt = format!("mnemonic{passphrase}");
+        use zeroize::Zeroize;
+        let mut salt = format!("mnemonic{passphrase}");
         let mut seed = Zeroizing::new([0u8; 64]);
         pbkdf2::pbkdf2_hmac::<sha2::Sha512>(
             self.words.as_bytes(),
@@ -182,6 +183,7 @@ impl Mnemonic {
             2048,
             &mut *seed,
         );
+        salt.zeroize();
         seed
     }
 

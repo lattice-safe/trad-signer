@@ -11,6 +11,13 @@ pub mod rlp;
 pub mod siwe;
 pub mod transaction;
 
+/// BLS12-381 for Ethereum Proof-of-Stake (Beacon Chain).
+///
+/// Re-exported from `crate::bls` since BLS12-381 is fundamentally
+/// an Ethereum consensus layer primitive.
+#[cfg(feature = "bls")]
+pub use crate::bls;
+
 use crate::error::SignerError;
 use crate::traits;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, SigningKey, VerifyingKey};
@@ -19,28 +26,54 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 /// An Ethereum ECDSA signature with recovery ID.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[must_use]
 pub struct EthereumSignature {
     /// The R component (32 bytes).
     pub r: [u8; 32],
     /// The S component (32 bytes), guaranteed to be low-S (EIP-2).
     pub s: [u8; 32],
     /// Recovery ID: 27 or 28 (legacy), or chain_id * 2 + 35 + rec_id (EIP-155).
-    pub v: u8,
+    /// Stored as `u64` to support high chain IDs (Polygon=137, Arbitrum=42161, etc.).
+    pub v: u64,
+}
+
+impl core::fmt::Display for EthereumSignature {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x")?;
+        for byte in &self.r {
+            write!(f, "{byte:02x}")?;
+        }
+        for byte in &self.s {
+            write!(f, "{byte:02x}")?;
+        }
+        write!(f, "{:x}", self.v)
+    }
 }
 
 impl EthereumSignature {
-    /// Encode as 65-byte `r || s || v`.
+    /// Encode as 65-byte `r || s || v` (legacy, v truncated to u8).
+    ///
+    /// For EIP-155 signatures with high chain IDs, use `to_bytes_eip155()` instead.
     pub fn to_bytes(&self) -> [u8; 65] {
         let mut out = [0u8; 65];
         out[..32].copy_from_slice(&self.r);
         out[32..64].copy_from_slice(&self.s);
-        out[64] = self.v;
+        out[64] = self.v as u8;
         out
     }
 
-    /// Decode from 65-byte `r || s || v`.
+    /// Encode as `r (32) || s (32) || v (8 bytes BE)` for EIP-155 with large chain IDs.
+    pub fn to_bytes_eip155(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(72);
+        out.extend_from_slice(&self.r);
+        out.extend_from_slice(&self.s);
+        out.extend_from_slice(&self.v.to_be_bytes());
+        out
+    }
+
+    /// Decode from 65-byte `r || s || v` (v as single byte).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, SignerError> {
         if bytes.len() != 65 {
             return Err(SignerError::InvalidSignature(format!(
@@ -52,7 +85,19 @@ impl EthereumSignature {
         let mut s = [0u8; 32];
         r.copy_from_slice(&bytes[..32]);
         s.copy_from_slice(&bytes[32..64]);
-        Ok(Self { r, s, v: bytes[64] })
+        Ok(Self { r, s, v: u64::from(bytes[64]) })
+    }
+
+    /// Extract the recovery bit (0 or 1) from `v`, handling both
+    /// legacy (v=27/28) and EIP-155 (v = chain_id*2 + 35 + {0,1}).
+    pub fn recovery_bit(&self) -> u8 {
+        if self.v >= 35 {
+            // EIP-155: recovery_bit = (v - 35) % 2
+            ((self.v - 35) % 2) as u8
+        } else {
+            // Legacy: v = 27 or 28
+            (self.v.wrapping_sub(27) & 1) as u8
+        }
     }
 }
 
@@ -109,7 +154,7 @@ impl EthereumSigner {
         Ok(EthereumSignature {
             r: r_bytes,
             s: s_bytes,
-            v: 27 + v,
+            v: 27 + u64::from(v),
         })
     }
 
@@ -163,15 +208,14 @@ impl EthereumSigner {
         let mut sig = self.sign_digest(digest)?;
         // Convert v from legacy (27/28) to EIP-155 (35 + chain_id*2 + {0,1})
         let recovery_bit = sig.v - 27; // 0 or 1
-        sig.v = (recovery_bit as u64)
+        sig.v = recovery_bit
             .checked_add(
                 chain_id
                     .checked_mul(2)
                     .ok_or_else(|| SignerError::SigningFailed("chain_id overflow".into()))?,
             )
             .and_then(|v| v.checked_add(35))
-            .ok_or_else(|| SignerError::SigningFailed("EIP-155 v overflow".into()))?
-            as u8;
+            .ok_or_else(|| SignerError::SigningFailed("EIP-155 v overflow".into()))?;
         Ok(sig)
     }
 
@@ -306,8 +350,8 @@ pub fn ecrecover_digest(
     digest: &[u8; 32],
     signature: &EthereumSignature,
 ) -> Result<[u8; 20], SignerError> {
-    let rec_id = RecoveryId::try_from(signature.v.wrapping_sub(27)).map_err(|_| {
-        SignerError::InvalidSignature("invalid recovery id (v must be 27 or 28)".into())
+    let rec_id = RecoveryId::try_from(signature.recovery_bit()).map_err(|_| {
+        SignerError::InvalidSignature("invalid recovery id".into())
     })?;
 
     let mut sig_bytes = [0u8; 64];
@@ -489,7 +533,10 @@ impl traits::Signer for EthereumSigner {
 
 impl traits::KeyPair for EthereumSigner {
     fn generate() -> Result<Self, SignerError> {
-        let signing_key = SigningKey::random(&mut k256::elliptic_curve::rand_core::OsRng);
+        let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
+        crate::security::secure_random(&mut *key_bytes)?;
+        let signing_key = SigningKey::from_bytes((&*key_bytes).into())
+            .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
         Ok(Self { signing_key })
     }
 
@@ -529,7 +576,7 @@ impl EthereumVerifier {
         digest: &[u8; 32],
         signature: &EthereumSignature,
     ) -> Result<bool, SignerError> {
-        let rec_id = RecoveryId::from_byte(signature.v.wrapping_sub(27))
+        let rec_id = RecoveryId::from_byte(signature.recovery_bit())
             .ok_or_else(|| SignerError::InvalidSignature("invalid recovery id".into()))?;
 
         let mut sig_bytes = [0u8; 64];
