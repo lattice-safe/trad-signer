@@ -12,8 +12,10 @@ use sha2::{Digest, Sha512};
 
 /// A Solana Ed25519 signature (64 bytes).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SolanaSignature {
     /// The 64-byte Ed25519 signature.
+    #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 64],
 }
 

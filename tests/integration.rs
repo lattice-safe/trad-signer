@@ -234,32 +234,54 @@ mod mnemonic_multichaain {
 mod bip85_workflow {
     use trad_signer::hd_key::ExtendedPrivateKey;
     use trad_signer::bip85;
+    use trad_signer::mnemonic::Mnemonic;
     use trad_signer::bitcoin::BitcoinSigner;
     use trad_signer::traits::{KeyPair, Signer};
 
-    /// BIP-85: master → derive WIF → create BTC signer → sign
+    /// BIP-85: master → child mnemonic → derive BTC → sign
     #[test]
-    fn test_bip85_deterministic_key_derivation() {
+    fn test_bip85_child_mnemonic_to_btc_signing() {
         let seed = [0xABu8; 64];
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
 
-        // Derive WIF private key via BIP-85
-        let wif = bip85::derive_wif(&master, 0).unwrap();
-        assert!(wif.starts_with('K') || wif.starts_with('L'));
+        // Derive a child 12-word mnemonic from the master
+        let child_phrase = bip85::derive_bip39(&master, 0, 12, 0).unwrap();
 
-        // Derive a child xprv via BIP-85
-        let child_xprv = bip85::derive_xprv(&master, 0).unwrap();
-        let btc_signer = BitcoinSigner::from_bytes(&child_xprv.private_key_bytes()).unwrap();
+        // This should NOT fail — proves the checksum bug is fixed
+        let child_m = Mnemonic::from_phrase(&child_phrase).unwrap();
+        let child_seed = child_m.to_seed("");
+        let child_master = ExtendedPrivateKey::from_seed(&*child_seed).unwrap();
+
+        // Derive BTC key from the child HD tree
+        let btc_key = child_master
+            .derive_path(&trad_signer::hd_key::DerivationPath::bitcoin_segwit(0))
+            .unwrap();
+        let btc_signer = BitcoinSigner::from_bytes(&btc_key.private_key_bytes()).unwrap();
         let sig = btc_signer.sign(b"BIP-85 derived signing").unwrap();
         assert!(!sig.der_bytes.is_empty());
 
-        // Deterministic: same master → same child xprv → same address
-        let child_xprv_2 = bip85::derive_xprv(&master, 0).unwrap();
-        assert_eq!(&*child_xprv.private_key_bytes(), &*child_xprv_2.private_key_bytes());
+        // Deterministic: same master → same child → same address
+        let child_phrase_2 = bip85::derive_bip39(&master, 0, 12, 0).unwrap();
+        assert_eq!(child_phrase, child_phrase_2);
+    }
 
-        // Different index → different key
-        let child_xprv_1 = bip85::derive_xprv(&master, 1).unwrap();
-        assert_ne!(&*child_xprv.private_key_bytes(), &*child_xprv_1.private_key_bytes());
+    /// BIP-85: derive_bip39 round-trips through from_phrase for all word counts
+    #[test]
+    fn test_bip85_mnemonic_roundtrip_all_sizes() {
+        let seed = [0x42u8; 64];
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+
+        for words in [12, 15, 18, 21, 24] {
+            let phrase = bip85::derive_bip39(&master, 0, words, 0).unwrap();
+            let parsed = Mnemonic::from_phrase(&phrase);
+            assert!(
+                parsed.is_ok(),
+                "BIP-85 derive_bip39({words}) → from_phrase round-trip failed: {:?}",
+                parsed.err()
+            );
+            let w: Vec<&str> = phrase.split_whitespace().collect();
+            assert_eq!(w.len(), words as usize);
+        }
     }
 }
 

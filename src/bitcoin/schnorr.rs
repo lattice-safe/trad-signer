@@ -11,8 +11,10 @@ use zeroize::Zeroizing;
 
 /// A BIP-340 Schnorr signature (64 bytes).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SchnorrSignature {
     /// The 64-byte signature.
+    #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 64],
 }
 

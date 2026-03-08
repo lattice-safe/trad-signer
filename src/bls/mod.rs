@@ -14,8 +14,10 @@ pub const ETH2_DST: &[u8] = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_";
 
 /// A BLS12-381 signature (96 bytes, G2 point).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlsSignature {
     /// The 96-byte compressed G2 signature.
+    #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 96],
 }
 
@@ -41,8 +43,10 @@ impl BlsSignature {
 
 /// A BLS12-381 public key (48 bytes, G1 point).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlsPublicKey {
     /// The 48-byte compressed G1 public key.
+    #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 48],
 }
 

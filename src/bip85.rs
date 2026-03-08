@@ -143,10 +143,8 @@ fn entropy_to_mnemonic(entropy: &[u8]) -> Result<String, SignerError> {
             bit_vec.push((byte >> j) & 1 == 1);
         }
     }
-    for j in (0..checksum_bits).rev() {
-        let byte_idx = (8 - 1 - j) / 8; // which byte of checksum
-        let bit_idx = 7 - ((8 - 1 - j) % 8); // which bit in that byte
-        bit_vec.push((checksum_hash[byte_idx] >> bit_idx) & 1 == 1);
+    for j in 0..checksum_bits {
+        bit_vec.push((checksum_hash[j / 8] >> (7 - (j % 8))) & 1 == 1);
     }
 
     // Split into 11-bit groups

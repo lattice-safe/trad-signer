@@ -10,8 +10,10 @@ use zeroize::Zeroizing;
 
 /// A NEO ECDSA signature (64 bytes, r || s).
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NeoSignature {
     /// 64 bytes: r (32) || s (32).
+    #[cfg_attr(feature = "serde", serde(with = "crate::hex_bytes"))]
     pub bytes: [u8; 64],
 }
 

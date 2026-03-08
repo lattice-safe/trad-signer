@@ -279,3 +279,117 @@ mod bls_serde {
         assert_eq!(signer.public_key_bytes(), signer.public_key_bytes_uncompressed());
     }
 }
+
+// ─── JSON Serde Round-Trip Tests ─────────────────────────────────
+
+#[cfg(all(feature = "serde", feature = "ethereum"))]
+mod json_eth {
+    use trad_signer::ethereum::{EthereumSigner, EthereumSignature};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_ethereum_sig_json_roundtrip() {
+        let signer = EthereumSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: EthereumSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.r, restored.r);
+        assert_eq!(sig.s, restored.s);
+        assert_eq!(sig.v, restored.v);
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "bitcoin"))]
+mod json_btc {
+    use trad_signer::bitcoin::{BitcoinSigner, BitcoinSignature};
+    use trad_signer::bitcoin::schnorr::{SchnorrSigner, SchnorrSignature};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_bitcoin_sig_json_roundtrip() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: BitcoinSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.der_bytes, restored.der_bytes);
+    }
+
+    #[test]
+    fn test_schnorr_sig_json_roundtrip() {
+        let signer = SchnorrSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        assert!(json.contains("bytes")); // hex-encoded string
+        let restored: SchnorrSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.bytes, restored.bytes);
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "solana"))]
+mod json_sol {
+    use trad_signer::solana::{SolanaSigner, SolanaSignature};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_solana_sig_json_roundtrip() {
+        let signer = SolanaSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: SolanaSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.bytes, restored.bytes);
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "neo"))]
+mod json_neo {
+    use trad_signer::neo::{NeoSigner, NeoSignature};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_neo_sig_json_roundtrip() {
+        let signer = NeoSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: NeoSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.bytes, restored.bytes);
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "xrp"))]
+mod json_xrp {
+    use trad_signer::xrp::{XrpEcdsaSigner, XrpSignature};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_xrp_sig_json_roundtrip() {
+        let signer = XrpEcdsaSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: XrpSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.bytes, restored.bytes);
+    }
+}
+
+#[cfg(all(feature = "serde", feature = "bls"))]
+mod json_bls {
+    use trad_signer::bls::{BlsSigner, BlsSignature, BlsPublicKey};
+    use trad_signer::traits::{KeyPair, Signer};
+
+    #[test]
+    fn test_bls_sig_json_roundtrip() {
+        let signer = BlsSigner::generate().unwrap();
+        let sig = signer.sign(b"json test").unwrap();
+        let json = serde_json::to_string(&sig).unwrap();
+        let restored: BlsSignature = serde_json::from_str(&json).unwrap();
+        assert_eq!(sig.bytes, restored.bytes);
+    }
+
+    #[test]
+    fn test_bls_pubkey_json_roundtrip() {
+        let signer = BlsSigner::generate().unwrap();
+        let pk = signer.public_key();
+        let json = serde_json::to_string(&pk).unwrap();
+        let restored: BlsPublicKey = serde_json::from_str(&json).unwrap();
+        assert_eq!(pk.bytes, restored.bytes);
+    }
+}

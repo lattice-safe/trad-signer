@@ -16,6 +16,9 @@ pub mod encoding;
 #[cfg(feature = "serde")]
 pub(crate) mod serde_zeroizing;
 
+#[cfg(feature = "serde")]
+pub(crate) mod hex_bytes;
+
 #[cfg(feature = "ethereum")]
 pub mod ethereum;
 
