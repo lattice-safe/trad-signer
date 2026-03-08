@@ -314,4 +314,37 @@ mod tests {
         let verifier = NeoVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
         assert!(verifier.verify(b"", &sig).unwrap());
     }
+
+    // ─── NEO Known Address Vectors ──────────────────────────────
+
+    #[test]
+    fn test_neo_address_format() {
+        let signer = NeoSigner::generate().unwrap();
+        let addr = signer.address();
+        assert!(addr.starts_with('A'), "NEO address must start with 'A'");
+        assert_eq!(addr.len(), 34); // NEO N3 addresses are 34 chars
+        assert!(validate_address(&addr));
+    }
+
+    #[test]
+    fn test_neo_script_hash_length() {
+        let signer = NeoSigner::generate().unwrap();
+        let hash = signer.script_hash();
+        assert_eq!(hash.len(), 20);
+    }
+
+    #[test]
+    fn test_neo_address_validation_edges() {
+        assert!(!validate_address(""));
+        assert!(!validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH")); // Bitcoin
+        assert!(!validate_address("AINVALID"));
+    }
+
+    #[test]
+    fn test_neo_address_deterministic() {
+        let signer = NeoSigner::generate().unwrap();
+        let addr1 = signer.address();
+        let addr2 = signer.address();
+        assert_eq!(addr1, addr2);
+    }
 }

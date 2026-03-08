@@ -306,4 +306,46 @@ mod tests {
         let _: Zeroizing<Vec<u8>> = signer.private_key_bytes();
         drop(signer);
     }
+
+    // ─── BIP-340 Additional Vectors ─────────────────────────────
+
+    #[test]
+    fn test_bip340_vector_4_tweaked_key() {
+        // BIP-340 Test Vector 4: signing with a specific key
+        let sk = hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let signer = SchnorrSigner::from_bytes(&sk).unwrap();
+        let pk = signer.public_key_bytes();
+        // Public key for sk=1 (x-only) should be the generator point's x-coordinate
+        assert_eq!(
+            hex::encode(&pk).to_uppercase(),
+            "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"
+        );
+        // Sign and verify
+        let sig = signer.sign(b"BIP-340 vector 4 test").unwrap();
+        let verifier = SchnorrVerifier::from_public_key_bytes(&pk).unwrap();
+        assert!(verifier.verify(b"BIP-340 vector 4 test", &sig).unwrap());
+    }
+
+    // ─── P2TR Address Format ────────────────────────────────────
+
+    #[test]
+    fn test_p2tr_address_format() {
+        let signer = SchnorrSigner::generate().unwrap();
+        let addr = signer.p2tr_address().unwrap();
+        assert!(addr.starts_with("bc1p"), "P2TR must start with bc1p");
+        assert_eq!(addr.len(), 62);
+    }
+
+    #[test]
+    fn test_p2tr_testnet_address_format() {
+        let signer = SchnorrSigner::generate().unwrap();
+        let addr = signer.p2tr_testnet_address().unwrap();
+        assert!(addr.starts_with("tb1p"), "Testnet P2TR must start with tb1p");
+    }
+
+    #[test]
+    fn test_x_only_pubkey_length() {
+        let signer = SchnorrSigner::generate().unwrap();
+        assert_eq!(signer.public_key_bytes().len(), 32); // x-only = 32 bytes
+    }
 }

@@ -48,3 +48,75 @@ pub enum SignerError {
     #[error("parse error: {0}")]
     ParseError(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_display_invalid_private_key() {
+        let e = SignerError::InvalidPrivateKey("too short".into());
+        assert_eq!(e.to_string(), "invalid private key: too short");
+    }
+
+    #[test]
+    fn test_display_invalid_public_key() {
+        let e = SignerError::InvalidPublicKey("not on curve".into());
+        assert!(e.to_string().contains("not on curve"));
+    }
+
+    #[test]
+    fn test_display_invalid_signature() {
+        let e = SignerError::InvalidSignature("bad DER".into());
+        assert!(e.to_string().contains("bad DER"));
+    }
+
+    #[test]
+    fn test_display_signing_failed() {
+        let e = SignerError::SigningFailed("nonce error".into());
+        assert!(e.to_string().contains("nonce error"));
+    }
+
+    #[test]
+    fn test_display_verification_failed() {
+        let e = SignerError::VerificationFailed;
+        assert_eq!(e.to_string(), "verification failed");
+    }
+
+    #[test]
+    fn test_display_invalid_hash_length() {
+        let e = SignerError::InvalidHashLength { expected: 32, got: 20 };
+        let s = e.to_string();
+        assert!(s.contains("32"));
+        assert!(s.contains("20"));
+    }
+
+    #[test]
+    fn test_display_entropy_error() {
+        assert_eq!(SignerError::EntropyError.to_string(), "entropy error");
+    }
+
+    #[test]
+    fn test_display_aggregation_error() {
+        let e = SignerError::AggregationError("no shares".into());
+        assert!(e.to_string().contains("no shares"));
+    }
+
+    #[test]
+    fn test_display_encoding_error() {
+        let e = SignerError::EncodingError("bad bech32".into());
+        assert!(e.to_string().contains("bad bech32"));
+    }
+
+    #[test]
+    fn test_display_parse_error() {
+        let e = SignerError::ParseError("invalid descriptor".into());
+        assert!(e.to_string().contains("invalid descriptor"));
+    }
+
+    #[test]
+    fn test_error_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SignerError>();
+    }
+}

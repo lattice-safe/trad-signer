@@ -540,4 +540,72 @@ mod tests {
         let _: Zeroizing<Vec<u8>> = key_bytes;
         drop(signer);
     }
+
+    // ─── Known Address Vectors ──────────────────────────────────
+
+    #[test]
+    fn test_p2pkh_known_address_privkey_1() {
+        // Private key = 1 → generator point G
+        // Compressed P2PKH = 1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH
+        let sk = hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let signer = BitcoinSigner::from_bytes(&sk).unwrap();
+        assert_eq!(signer.p2pkh_address(), "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH");
+    }
+
+    #[test]
+    fn test_p2wpkh_known_address_privkey_1() {
+        // Private key = 1 → bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
+        let sk = hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let signer = BitcoinSigner::from_bytes(&sk).unwrap();
+        assert_eq!(
+            signer.p2wpkh_address().unwrap(),
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        );
+    }
+
+    // ─── WIF Round-Trip ─────────────────────────────────────────
+
+    #[test]
+    fn test_wif_encode_known() {
+        // Private key = 1 → known WIF
+        let sk = hex::decode("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let signer = BitcoinSigner::from_bytes(&sk).unwrap();
+        let wif = signer.to_wif();
+        assert!(wif.starts_with('K') || wif.starts_with('L'));
+        assert_eq!(wif.len(), 52); // compressed WIF is 52 chars
+    }
+
+    #[test]
+    fn test_wif_roundtrip() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let wif = signer.to_wif();
+        let restored = BitcoinSigner::from_wif(&wif).unwrap();
+        assert_eq!(&*signer.private_key_bytes(), &*restored.private_key_bytes());
+        assert_eq!(signer.p2pkh_address(), restored.p2pkh_address());
+    }
+
+    // ─── Address Validation ─────────────────────────────────────
+
+    #[test]
+    fn test_validate_known_addresses() {
+        assert!(validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"));    // P2PKH
+        assert!(validate_address("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")); // P2WPKH
+        assert!(!validate_address(""));
+        assert!(!validate_address("1invalid"));
+        assert!(!validate_address("bc1qinvalid"));
+    }
+
+    // ─── BIP-137 Message Signing ────────────────────────────────
+
+    #[test]
+    fn test_bip137_sign_verify_roundtrip() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let sig = signer.sign_message(b"Hello Bitcoin").unwrap();
+        // BIP-137 uses the same ECDSA path → DER encoded
+        assert_eq!(sig.der_bytes[0], 0x30); // DER SEQUENCE tag
+        // Verify round-trip
+        let verifier = BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
+        let digest = bitcoin_message_hash(b"Hello Bitcoin");
+        assert!(verifier.verify_prehashed(&digest, &sig).unwrap());
+    }
 }

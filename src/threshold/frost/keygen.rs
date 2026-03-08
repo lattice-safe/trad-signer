@@ -289,4 +289,55 @@ mod tests {
         assert!(trusted_dealer_keygen(&secret, 1, 3).is_err()); // min < 2
         assert!(trusted_dealer_keygen(&secret, 3, 2).is_err()); // max < min
     }
+
+    #[test]
+    fn test_zero_secret_rejected() {
+        assert!(trusted_dealer_keygen(&[0u8; 32], 2, 3).is_err());
+    }
+
+    #[test]
+    fn test_all_shares_reconstruct_to_secret() {
+        // Use all 3 shares (instead of just 2) — should still recover same secret
+        let secret = [0x42u8; 32];
+        let out = trusted_dealer_keygen(&secret, 2, 3).unwrap();
+
+        let ids: Vec<Scalar> = (1u64..=3).map(Scalar::from).collect();
+        let mut reconstructed = Scalar::ZERO;
+        for (i, pkg) in out.key_packages.iter().enumerate() {
+            let lambda = derive_interpolating_value(&ids[i], &ids).unwrap();
+            reconstructed += lambda * *pkg.secret_share();
+        }
+        let original = scalar_from_bytes(&[0x42u8; 32]).unwrap();
+        assert_eq!(reconstructed, original);
+    }
+
+    #[test]
+    fn test_public_key_share() {
+        let secret = [0x42u8; 32];
+        let out = trusted_dealer_keygen(&secret, 2, 3).unwrap();
+        for pkg in &out.key_packages {
+            let pk = pkg.public_key();
+            // G * sk_i should not be identity
+            assert_ne!(pk, AffinePoint::IDENTITY);
+        }
+    }
+
+    #[test]
+    fn test_keygen_3_of_5() {
+        let secret = [0x11u8; 32];
+        let out = trusted_dealer_keygen(&secret, 3, 5).unwrap();
+        assert_eq!(out.key_packages.len(), 5);
+        assert_eq!(out.vss_commitments.commitments.len(), 3); // degree t-1 = 2, plus constant
+        for pkg in &out.key_packages {
+            assert!(out.vss_commitments.verify_share(pkg.identifier, pkg.secret_share()));
+        }
+    }
+
+    #[test]
+    fn test_vss_verify_share_zero_identifier_rejected() {
+        let secret = [0x42u8; 32];
+        let out = trusted_dealer_keygen(&secret, 2, 3).unwrap();
+        // identifier = 0 should fail
+        assert!(!out.vss_commitments.verify_share(0, out.key_packages[0].secret_share()));
+    }
 }

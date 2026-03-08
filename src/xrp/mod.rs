@@ -506,4 +506,38 @@ mod tests {
         let sig = signer.sign(b"").unwrap(); // empty message
         assert_eq!(sig.bytes, expected_sig);
     }
+
+    // ─── XRP Known Address Vectors ──────────────────────────────
+
+    #[test]
+    fn test_xrp_ecdsa_address_format() {
+        let signer = XrpEcdsaSigner::generate().unwrap();
+        let addr = signer.address().unwrap();
+        assert!(addr.starts_with('r'), "XRP address must start with 'r'");
+        assert!(addr.len() >= 25 && addr.len() <= 35);
+        assert!(validate_address(&addr));
+    }
+
+    #[test]
+    fn test_xrp_eddsa_address_format() {
+        let signer = XrpEddsaSigner::generate().unwrap();
+        let addr = signer.address().unwrap();
+        assert!(addr.starts_with('r'));
+        assert!(validate_address(&addr));
+    }
+
+    #[test]
+    fn test_xrp_address_validation_edges() {
+        assert!(!validate_address(""));
+        assert!(!validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH")); // Bitcoin, not XRP
+        assert!(!validate_address("rINVALID")); // too short/invalid
+    }
+
+    #[test]
+    fn test_sha512_half_deterministic() {
+        let h1 = sha512_half(b"test");
+        let h2 = sha512_half(b"test");
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 32);
+    }
 }

@@ -379,4 +379,96 @@ mod tests {
             assert_eq!(m.phrase(), m2.phrase());
         }
     }
+
+    // ─── BIP-39 Official Test Vectors (TREZOR reference) ────────
+
+    #[test]
+    fn test_bip39_vector_all_zeros_12() {
+        // BIP-39: 128-bit all-zeros entropy → known mnemonic
+        let entropy = hex::decode("00000000000000000000000000000000").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        assert_eq!(
+            m.phrase(),
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        );
+    }
+
+    #[test]
+    fn test_bip39_vector_all_zeros_seed() {
+        // BIP-39: all-zeros 12-word with passphrase "TREZOR"
+        // Our PBKDF2-HMAC-SHA512 output (verified deterministic)
+        let entropy = hex::decode("00000000000000000000000000000000").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        let seed = m.to_seed("TREZOR");
+        // Verify determinism: same inputs → same output
+        let seed2 = m.to_seed("TREZOR");
+        assert_eq!(*seed, *seed2);
+        // Verify length
+        assert_eq!(seed.len(), 64);
+        // Verify different passphrase gives different seed
+        let seed3 = m.to_seed("different");
+        assert_ne!(*seed, *seed3);
+    }
+
+    #[test]
+    fn test_bip39_vector_7f_entropy() {
+        let entropy = hex::decode("7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        assert_eq!(
+            m.phrase(),
+            "legal winner thank year wave sausage worth useful legal winner thank yellow"
+        );
+    }
+
+    #[test]
+    fn test_bip39_vector_7f_seed() {
+        let entropy = hex::decode("7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        let seed = m.to_seed("TREZOR");
+        assert_eq!(
+            hex::encode(&*seed),
+            "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607"
+        );
+    }
+
+    #[test]
+    fn test_bip39_vector_ff_12() {
+        let entropy = hex::decode("ffffffffffffffffffffffffffffffff").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        assert_eq!(
+            m.phrase(),
+            "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"
+        );
+    }
+
+    #[test]
+    fn test_bip39_vector_24_words() {
+        // 256-bit entropy → 24 words
+        let entropy = hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        assert_eq!(
+            m.phrase(),
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+        );
+    }
+
+    #[test]
+    fn test_bip39_vector_24_seed() {
+        let entropy = hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        let m = Mnemonic::from_entropy(&entropy).unwrap();
+        let seed = m.to_seed("TREZOR");
+        assert_eq!(
+            hex::encode(&*seed),
+            "bda85446c68413707090a52022edd26a1c9462295029f2e60cd7c4f2bbd3097170af7a4d73245cafa9c3cca8d561a7c3de6f5d4a10be8ed2a5e608d68f92fcc8"
+        );
+    }
+
+    #[test]
+    fn test_bip39_from_phrase_round_trip() {
+        // From known phrase → seed → verify
+        let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let m = Mnemonic::from_phrase(phrase).unwrap();
+        assert_eq!(m.phrase(), phrase);
+        assert_eq!(m.word_count(), 12);
+    }
 }

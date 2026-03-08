@@ -202,4 +202,90 @@ mod tests {
         let addr = bech32_encode("tb", 0, &[0xCC; 20]).expect("ok");
         assert!(addr.starts_with("tb1q"));
     }
+
+    // ─── Bech32 Known Address Vectors ───────────────────────────
+
+    #[test]
+    fn test_bech32_bip173_p2wpkh_vector() {
+        // BIP-173 test vector: P2WPKH bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4
+        let program = hex::decode("751e76e8199196d454941c45d1b3a323f1433bd6").unwrap();
+        let addr = bech32_encode("bc", 0, &program).unwrap();
+        assert_eq!(addr, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
+    }
+
+    #[test]
+    fn test_bech32_bip350_p2tr_vector() {
+        // BIP-350: P2TR address with witness version 1
+        let program = hex::decode("a60869f0dbcf1dc659c9cecbee736b12006a35d655ac7e1caeff5ebc1085a044").unwrap();
+        let addr = bech32_encode("bc", 1, &program).unwrap();
+        assert!(addr.starts_with("bc1p"));
+        assert_eq!(addr.len(), 62); // Bech32m P2TR addresses are 62 chars
+    }
+
+    #[test]
+    fn test_bech32_invalid_hrp() {
+        assert!(bech32_encode("", 0, &[0; 20]).is_err());
+    }
+
+    // ─── Base58Check Known Address Vectors ──────────────────────
+
+    #[test]
+    fn test_base58check_bitcoin_p2pkh_genesis() {
+        // Bitcoin genesis coinbase P2PKH: HASH160 of generator pubkey
+        // Version 0x00 + 751e76e8199196d454941c45d1b3a323f1433bd6
+        let hash160 = hex::decode("751e76e8199196d454941c45d1b3a323f1433bd6").unwrap();
+        let addr = base58check_encode(0x00, &hash160);
+        assert_eq!(addr, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH");
+    }
+
+    #[test]
+    fn test_base58check_decode_known_address() {
+        let (version, payload) = base58check_decode("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH").unwrap();
+        assert_eq!(version, 0x00);
+        assert_eq!(
+            hex::encode(payload),
+            "751e76e8199196d454941c45d1b3a323f1433bd6"
+        );
+    }
+
+    // ─── Compact Size Boundary Values ───────────────────────────
+
+    #[test]
+    fn test_compact_size_boundary_252() {
+        let mut buf = Vec::new();
+        encode_compact_size(&mut buf, 252);
+        assert_eq!(buf.len(), 1); // single byte
+        assert_eq!(buf[0], 252);
+    }
+
+    #[test]
+    fn test_compact_size_boundary_253() {
+        let mut buf = Vec::new();
+        encode_compact_size(&mut buf, 253);
+        assert_eq!(buf[0], 0xFD); // 3 bytes: 0xFD + u16 LE
+        assert_eq!(buf.len(), 3);
+        let mut offset = 0;
+        assert_eq!(read_compact_size(&buf, &mut offset).unwrap(), 253);
+    }
+
+    #[test]
+    fn test_compact_size_truncated_u16() {
+        let buf = vec![0xFD, 0x01]; // need 2 bytes, only 1
+        let mut offset = 0;
+        assert!(read_compact_size(&buf, &mut offset).is_err());
+    }
+
+    #[test]
+    fn test_compact_size_truncated_u32() {
+        let buf = vec![0xFE, 0x01, 0x00]; // need 4 bytes, only 2
+        let mut offset = 0;
+        assert!(read_compact_size(&buf, &mut offset).is_err());
+    }
+
+    #[test]
+    fn test_compact_size_truncated_u64() {
+        let buf = vec![0xFF, 0x01, 0x00, 0x00, 0x00]; // need 8 bytes, only 4
+        let mut offset = 0;
+        assert!(read_compact_size(&buf, &mut offset).is_err());
+    }
 }
