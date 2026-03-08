@@ -8,6 +8,8 @@ pub mod rlp;
 pub mod transaction;
 pub mod siwe;
 pub mod abi;
+pub mod keystore;
+pub mod eips;
 
 use crate::error::SignerError;
 use crate::traits;

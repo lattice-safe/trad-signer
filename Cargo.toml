@@ -26,7 +26,7 @@ default = [
 ]
 std = []
 serde = ["dep:serde", "k256/serde", "p256/serde"]
-ethereum = ["dep:k256", "dep:sha3"]
+ethereum = ["dep:k256", "dep:sha3", "dep:scrypt", "dep:aes", "dep:ctr"]
 bitcoin = ["dep:k256"]
 solana = ["dep:ed25519-dalek", "dep:rand_core"]
 xrp = ["dep:k256", "dep:ed25519-dalek", "dep:rand_core"]
@@ -79,6 +79,11 @@ thiserror = "2.0"
 
 # Serialization (optional)
 serde = { version = "1.0", features = ["derive"], optional = true }
+
+# Keystore encryption (optional, used by ethereum keystore v3)
+scrypt = { version = "0.11", optional = true }
+aes = { version = "0.8", optional = true }
+ctr = { version = "0.9", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
