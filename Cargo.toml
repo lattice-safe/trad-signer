@@ -1,6 +1,6 @@
 [package]
 name = "trad-signer"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
@@ -37,6 +37,7 @@ mnemonic = ["dep:hmac", "dep:pbkdf2", "hd_key"]
 frost = ["dep:k256"]
 musig2 = ["dep:k256"]
 bip85 = ["hd_key", "dep:hmac"]
+custom_rng = []
 
 [dependencies]
 # ECDSA curves

@@ -588,8 +588,8 @@ mod bls_threshold_e2e {
         let kgen = threshold::threshold_keygen(2, 3).unwrap();
         let msg = b"bls threshold e2e";
 
-        let p1 = kgen.key_shares[0].sign(msg).unwrap();
-        let p2 = kgen.key_shares[1].sign(msg).unwrap();
+        let p1 = kgen.key_shares()[0].sign(msg).unwrap();
+        let p2 = kgen.key_shares()[1].sign(msg).unwrap();
 
         let agg = threshold::aggregate_partial_sigs(&[p1, p2], msg).unwrap();
         assert_ne!(agg.to_bytes(), [0u8; 96]);
@@ -603,7 +603,7 @@ mod bls_threshold_e2e {
         // Try 3 different 3-of-5 subsets
         for subset in &[[0, 1, 2], [0, 2, 4], [1, 3, 4]] {
             let sigs: Vec<_> = subset.iter()
-                .map(|&i| kgen.key_shares[i].sign(msg).unwrap())
+                .map(|&i| kgen.key_shares()[i].sign(msg).unwrap())
                 .collect();
             let agg = threshold::aggregate_partial_sigs(&sigs, msg).unwrap();
             assert_ne!(agg.to_bytes(), [0u8; 96]);

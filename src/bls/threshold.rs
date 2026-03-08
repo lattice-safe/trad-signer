@@ -72,13 +72,27 @@ pub struct BlsPartialSignature {
 /// Result of threshold key generation.
 pub struct BlsThresholdKeyGen {
     /// Key shares (one per participant).
-    pub key_shares: Vec<BlsKeyShare>,
+    key_shares: Vec<BlsKeyShare>,
     /// The group public key.
     pub group_public_key: BlsPublicKey,
     /// Threshold (minimum signers).
     pub threshold: u16,
     /// Total participants.
     pub total: u16,
+}
+
+impl BlsThresholdKeyGen {
+    /// Get a reference to the key shares (read-only).
+    #[must_use]
+    pub fn key_shares(&self) -> &[BlsKeyShare] {
+        &self.key_shares
+    }
+
+    /// Take ownership of the key shares (consumes and zeroizes on drop).
+    #[must_use]
+    pub fn into_key_shares(self) -> Vec<BlsKeyShare> {
+        self.key_shares
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
