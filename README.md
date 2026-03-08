@@ -177,6 +177,34 @@ let btc = Mnemonic::to_bitcoin_signer("abandon abandon ... about", "")?;
 
 ---
 
+## BIP-85 — Deterministic Entropy Derivation
+
+Derive unlimited child mnemonics, WIF keys, and xprv keys from a single master.
+
+```rust
+use trad_signer::hd_key::ExtendedPrivateKey;
+use trad_signer::bip85;
+
+let seed = [0xab_u8; 64];
+let master = ExtendedPrivateKey::from_seed(&seed)?;
+
+// Derive child BIP-39 mnemonics (deterministic & reproducible)
+let mnemonic_12 = bip85::derive_bip39(&master, 0, 12, 0)?;  // 12 words
+let mnemonic_24 = bip85::derive_bip39(&master, 0, 24, 0)?;  // 24 words
+
+// Derive WIF private key
+let wif = bip85::derive_wif(&master, 0)?;  // starts with K or L
+
+// Derive child xprv
+let child = bip85::derive_xprv(&master, 0)?;
+println!("Child xprv: {}", child.to_xprv());
+
+// Raw hex entropy (16-64 bytes)
+let entropy = bip85::derive_hex(&master, 32, 0)?;
+```
+
+---
+
 ## FROST — T-of-N Threshold Schnorr (RFC 9591)
 
 Any `t` of `n` participants can collaboratively sign. No single party holds the full key.
@@ -278,6 +306,52 @@ assert!(validate_sol("11111111111111111111111111111112"));               // Sola
 
 ---
 
+## BIP-322 Full Message Signing
+
+```rust
+use trad_signer::bitcoin::message;
+
+// Sign a message using BIP-322 "full" format (virtual tx chain)
+let witness = message::sign_full(
+    &private_key_bytes, b"Hello World", &script_pubkey,
+)?;
+
+// Verify against the signer's script
+let valid = message::verify_full(&witness, b"Hello World", &script_pubkey)?;
+```
+
+---
+
+## PSBT (Partially Signed Bitcoin Transactions)
+
+```rust
+use trad_signer::bitcoin::psbt::v0::Psbt;
+
+// Deserialize a PSBT
+let psbt = Psbt::deserialize(&psbt_bytes)?;
+println!("Inputs: {}", psbt.inputs.len());
+println!("Outputs: {}", psbt.outputs.len());
+println!("PSBT ID: {}", hex::encode(psbt.psbt_id()));
+
+// Round-trip: serialize → deserialize
+let reserialized = psbt.serialize();
+assert_eq!(psbt_bytes, reserialized);
+```
+
+---
+
+## Output Descriptors (BIP-380-386)
+
+```rust
+use trad_signer::bitcoin::descriptor;
+
+// Parse and derive addresses from output descriptors
+let desc = descriptor::parse("wpkh(02...pubkey...)");
+let addr = descriptor::derive_address(&desc, 0)?;
+```
+
+---
+
 ## Features
 
 All modules are enabled by default. Disable unused ones to reduce compile time:
@@ -299,6 +373,7 @@ trad-signer = { version = "0.4", default-features = false, features = ["ethereum
 | `mnemonic` | BIP-39 seed phrases (12/15/18/21/24 words) |
 | `frost` | FROST T-of-N threshold Schnorr (RFC 9591, secp256k1-SHA256) |
 | `musig2` | MuSig2 N-of-N multi-party Schnorr (BIP-327) |
+| `bip85` | BIP-85 deterministic entropy (child mnemonics, WIF, xprv) |
 | `serde` | Serialization support for keys and signatures |
 
 ## Security
@@ -310,7 +385,35 @@ trad-signer = { version = "0.4", default-features = false, features = ["ethereum
 - Constant-time comparisons via `subtle::ConstantTimeEq`
 - FROST nonces are single-use `Zeroizing<Scalar>` with drop guards
 - `cargo audit`: **0 vulnerabilities** across 117+ dependencies
-- **290+ tests** including RFC 9591, BIP-327, BIP-32, BIP-39, BIP-340, RFC 6979, RFC 8032, and FIPS 186-4 vectors
+- **445+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-322, BIP-327, BIP-340, BIP-341, RFC 6979, RFC 8032, RFC 9591, and FIPS 186-4 vectors
+
+## Architecture
+
+```
+src/
+├── crypto.rs          # Shared: tagged_hash, double_sha256, hash160, sha256
+├── encoding.rs        # Shared: compact_size, bech32, base58check
+├── error.rs           # Unified SignerError enum
+├── traits.rs          # KeyPair, Signer, Verifier traits
+├── bitcoin/
+│   ├── mod.rs         # ECDSA signer, WIF, P2PKH/P2WPKH, BIP-137
+│   ├── schnorr.rs     # BIP-340 Schnorr, P2TR addresses
+│   ├── taproot.rs     # BIP-341/342 Taproot scripts
+│   ├── message.rs     # BIP-322 full message signing
+│   ├── psbt/          # BIP-174 Partially Signed Bitcoin Transactions
+│   └── descriptor.rs  # BIP-380-386 output descriptors
+├── ethereum/          # EIP-191/712/155, ecrecover
+├── solana/            # Ed25519 signing
+├── xrp/               # ECDSA + Ed25519 dual-curve
+├── neo/               # P-256 (secp256r1)
+├── bls/               # BLS12-381 aggregated signatures
+├── threshold/
+│   ├── frost/         # RFC 9591 T-of-N threshold Schnorr
+│   └── musig2/        # BIP-327 N-of-N multi-party Schnorr
+├── hd_key.rs          # BIP-32/44 HD key derivation
+├── mnemonic.rs        # BIP-39 seed phrases
+└── bip85.rs           # BIP-85 deterministic entropy
+```
 
 ## License
 
