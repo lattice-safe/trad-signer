@@ -505,6 +505,75 @@ pub fn verify_share(
     Ok(lhs == rhs)
 }
 
+/// Identify misbehaving participants by verifying each signature share.
+///
+/// Returns a list of participant identifiers whose shares are invalid.
+/// If the list is empty, all shares are valid.
+///
+/// This is used for **identifiable abort**: if signature aggregation fails
+/// verification, the coordinator can pinpoint exactly which participant(s)
+/// submitted bad shares.
+///
+/// # Arguments
+/// - `sig_shares` — All collected signature shares
+/// - `commitments_list` — All commitments from round 1
+/// - `key_packages` — Key packages (needed for per-share public keys)
+/// - `group_public_key` — The group public key
+/// - `message` — The signed message
+pub fn identify_misbehaving(
+    sig_shares: &[SignatureShare],
+    commitments_list: &[SigningCommitments],
+    key_packages: &[KeyPackage],
+    group_public_key: &AffinePoint,
+    message: &[u8],
+) -> Result<Vec<u16>, SignerError> {
+    let mut cheaters = Vec::new();
+
+    for share in sig_shares {
+        // Find the commitment for this participant
+        let commitment = commitments_list
+            .iter()
+            .find(|c| c.identifier == share.identifier);
+
+        let commitment = match commitment {
+            Some(c) => c,
+            None => {
+                cheaters.push(share.identifier);
+                continue;
+            }
+        };
+
+        // Find the key package for this participant
+        let key_package = key_packages
+            .iter()
+            .find(|kp| kp.identifier == share.identifier);
+
+        let key_package = match key_package {
+            Some(kp) => kp,
+            None => {
+                cheaters.push(share.identifier);
+                continue;
+            }
+        };
+
+        let pk_share = key_package.public_key();
+        let valid = verify_share(
+            share,
+            commitment,
+            &pk_share,
+            group_public_key,
+            commitments_list,
+            message,
+        )?;
+
+        if !valid {
+            cheaters.push(share.identifier);
+        }
+    }
+
+    Ok(cheaters)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -655,5 +724,67 @@ mod tests {
             out1.group_public_key.to_encoded_point(true).as_bytes(),
             out2.group_public_key.to_encoded_point(true).as_bytes()
         );
+    }
+
+    // ─── Identifiable Abort Tests ───────────────────────────────
+
+    #[test]
+    fn test_identify_misbehaving_all_honest() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"identifiable abort honest";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n2 = commit(&kgen.key_packages[1]).unwrap();
+        let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+        let s2 = sign(&kgen.key_packages[1], n2, &comms, msg).unwrap();
+
+        let cheaters = identify_misbehaving(
+            &[s1, s2], &comms, &kgen.key_packages, &group_pk, msg,
+        ).unwrap();
+        assert!(cheaters.is_empty(), "no cheaters expected");
+    }
+
+    #[test]
+    fn test_identify_misbehaving_tampered_share() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"identifiable abort tampered";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n2 = commit(&kgen.key_packages[1]).unwrap();
+        let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+        let s2 = sign(&kgen.key_packages[1], n2, &comms, msg).unwrap();
+
+        // Tamper with participant 2's share
+        let tampered_s2 = SignatureShare {
+            identifier: s2.identifier,
+            share: s2.share + Scalar::ONE, // corrupt!
+        };
+
+        let cheaters = identify_misbehaving(
+            &[s1, tampered_s2], &comms, &kgen.key_packages, &group_pk, msg,
+        ).unwrap();
+        assert_eq!(cheaters, vec![2], "participant 2 should be identified as cheater");
+    }
+
+    #[test]
+    fn test_identify_misbehaving_both_tampered() {
+        let (kgen, group_pk) = setup_2_of_3();
+        let msg = b"both bad";
+
+        let n1 = commit(&kgen.key_packages[0]).unwrap();
+        let n2 = commit(&kgen.key_packages[1]).unwrap();
+        let comms = vec![n1.commitments.clone(), n2.commitments.clone()];
+        let s1 = sign(&kgen.key_packages[0], n1, &comms, msg).unwrap();
+        let s2 = sign(&kgen.key_packages[1], n2, &comms, msg).unwrap();
+
+        let bad1 = SignatureShare { identifier: s1.identifier, share: Scalar::ZERO };
+        let bad2 = SignatureShare { identifier: s2.identifier, share: Scalar::ZERO };
+
+        let cheaters = identify_misbehaving(
+            &[bad1, bad2], &comms, &kgen.key_packages, &group_pk, msg,
+        ).unwrap();
+        assert_eq!(cheaters.len(), 2, "both participants should be identified");
     }
 }

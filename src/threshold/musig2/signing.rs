@@ -132,7 +132,7 @@ pub fn key_sort(pubkeys: &[[u8; 33]]) -> Vec<[u8; 33]> {
 }
 
 /// Compute the hash of all public keys (used in key aggregation coefficient).
-fn hash_keys(pubkeys: &[[u8; 33]]) -> [u8; 32] {
+pub(crate) fn hash_keys(pubkeys: &[[u8; 33]]) -> [u8; 32] {
     let mut data = Vec::with_capacity(pubkeys.len() * 33);
     for pk in pubkeys {
         data.extend_from_slice(pk);
@@ -297,7 +297,7 @@ pub fn nonce_agg(pub_nonces: &[PubNonce]) -> Result<AggNonce, SignerError> {
 // ─── Partial Signing ────────────────────────────────────────────────
 
 /// Compute the nonce coefficient `b` from the session context.
-fn compute_nonce_coeff(
+pub(crate) fn compute_nonce_coeff(
     agg_nonce: &AggNonce,
     x_only_pubkey: &[u8; 32],
     msg: &[u8],

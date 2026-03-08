@@ -45,5 +45,7 @@
 
 pub mod signing;
 pub mod adaptor;
+pub mod tweak;
+pub mod nested;
 
 pub use signing::*;

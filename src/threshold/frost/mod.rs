@@ -47,3 +47,4 @@
 pub mod keygen;
 pub mod signing;
 pub mod dkg;
+pub mod refresh;
