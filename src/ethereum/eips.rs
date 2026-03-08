@@ -417,6 +417,342 @@ pub const EIP2335_CIPHER: &str = "aes-128-ctr";
 pub const EIP2335_CHECKSUM: &str = "sha256";
 
 // ═══════════════════════════════════════════════════════════════════
+// EIP-3009: Transfer With Authorization (USDC-style meta-tx)
+// ═══════════════════════════════════════════════════════════════════
+
+/// EIP-3009 TransferWithAuthorization for gasless token transfers.
+///
+/// Used by USDC and other compliant tokens. The token holder signs a
+/// typed message authorizing a relayer to execute the transfer on their behalf.
+#[derive(Debug, Clone)]
+pub struct TransferWithAuthorization {
+    /// Token holder (sender).
+    pub from: [u8; 20],
+    /// Recipient address.
+    pub to: [u8; 20],
+    /// Transfer amount (32-byte big-endian uint256).
+    pub value: [u8; 32],
+    /// Earliest valid timestamp.
+    pub valid_after: u64,
+    /// Latest valid timestamp.
+    pub valid_before: u64,
+    /// Unique nonce (32 bytes, chosen by the authorizer).
+    pub nonce: [u8; 32],
+}
+
+impl TransferWithAuthorization {
+    /// The EIP-712 typehash for `TransferWithAuthorization`.
+    ///
+    /// `keccak256("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")`
+    #[must_use]
+    pub fn type_hash() -> [u8; 32] {
+        keccak256(b"TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+    }
+
+    /// Compute the struct hash.
+    #[must_use]
+    pub fn struct_hash(&self) -> [u8; 32] {
+        let mut data = Vec::with_capacity(7 * 32);
+        data.extend_from_slice(&Self::type_hash());
+
+        let mut from_padded = [0u8; 32];
+        from_padded[12..].copy_from_slice(&self.from);
+        data.extend_from_slice(&from_padded);
+
+        let mut to_padded = [0u8; 32];
+        to_padded[12..].copy_from_slice(&self.to);
+        data.extend_from_slice(&to_padded);
+
+        data.extend_from_slice(&self.value);
+
+        let mut va = [0u8; 32];
+        va[24..].copy_from_slice(&self.valid_after.to_be_bytes());
+        data.extend_from_slice(&va);
+
+        let mut vb = [0u8; 32];
+        vb[24..].copy_from_slice(&self.valid_before.to_be_bytes());
+        data.extend_from_slice(&vb);
+
+        data.extend_from_slice(&self.nonce);
+
+        keccak256(&data)
+    }
+
+    /// Compute the EIP-712 signing hash.
+    #[must_use]
+    pub fn signing_hash(&self, domain_separator: &[u8; 32]) -> [u8; 32] {
+        eip712_signing_hash(domain_separator, &self.struct_hash())
+    }
+
+    /// Sign this authorization.
+    pub fn sign(
+        &self,
+        signer: &super::EthereumSigner,
+        domain_separator: &[u8; 32],
+    ) -> Result<super::EthereumSignature, SignerError> {
+        let hash = self.signing_hash(domain_separator);
+        signer.sign_digest(&hash)
+    }
+}
+
+/// EIP-3009 ReceiveWithAuthorization for pull-based token transfers.
+#[derive(Debug, Clone)]
+pub struct ReceiveWithAuthorization {
+    /// Token holder (sender).
+    pub from: [u8; 20],
+    /// Recipient (must be msg.sender that calls the contract).
+    pub to: [u8; 20],
+    /// Transfer amount (32-byte big-endian uint256).
+    pub value: [u8; 32],
+    /// Earliest valid timestamp.
+    pub valid_after: u64,
+    /// Latest valid timestamp.
+    pub valid_before: u64,
+    /// Unique nonce (32 bytes).
+    pub nonce: [u8; 32],
+}
+
+impl ReceiveWithAuthorization {
+    /// The EIP-712 typehash for `ReceiveWithAuthorization`.
+    #[must_use]
+    pub fn type_hash() -> [u8; 32] {
+        keccak256(b"ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+    }
+
+    /// Compute the struct hash.
+    #[must_use]
+    pub fn struct_hash(&self) -> [u8; 32] {
+        let mut data = Vec::with_capacity(7 * 32);
+        data.extend_from_slice(&Self::type_hash());
+
+        let mut from_padded = [0u8; 32];
+        from_padded[12..].copy_from_slice(&self.from);
+        data.extend_from_slice(&from_padded);
+
+        let mut to_padded = [0u8; 32];
+        to_padded[12..].copy_from_slice(&self.to);
+        data.extend_from_slice(&to_padded);
+
+        data.extend_from_slice(&self.value);
+
+        let mut va = [0u8; 32];
+        va[24..].copy_from_slice(&self.valid_after.to_be_bytes());
+        data.extend_from_slice(&va);
+
+        let mut vb = [0u8; 32];
+        vb[24..].copy_from_slice(&self.valid_before.to_be_bytes());
+        data.extend_from_slice(&vb);
+
+        data.extend_from_slice(&self.nonce);
+
+        keccak256(&data)
+    }
+
+    /// Sign this authorization.
+    pub fn sign(
+        &self,
+        signer: &super::EthereumSigner,
+        domain_separator: &[u8; 32],
+    ) -> Result<super::EthereumSignature, SignerError> {
+        let hash = eip712_signing_hash(domain_separator, &self.struct_hash());
+        signer.sign_digest(&hash)
+    }
+}
+
+/// EIP-3009 CancelAuthorization.
+#[derive(Debug, Clone)]
+pub struct CancelAuthorization {
+    /// The authorizer address.
+    pub authorizer: [u8; 20],
+    /// Nonce to cancel.
+    pub nonce: [u8; 32],
+}
+
+impl CancelAuthorization {
+    /// The EIP-712 typehash for `CancelAuthorization`.
+    #[must_use]
+    pub fn type_hash() -> [u8; 32] {
+        keccak256(b"CancelAuthorization(address authorizer,bytes32 nonce)")
+    }
+
+    /// Compute the struct hash.
+    #[must_use]
+    pub fn struct_hash(&self) -> [u8; 32] {
+        let mut data = Vec::with_capacity(3 * 32);
+        data.extend_from_slice(&Self::type_hash());
+
+        let mut auth_padded = [0u8; 32];
+        auth_padded[12..].copy_from_slice(&self.authorizer);
+        data.extend_from_slice(&auth_padded);
+
+        data.extend_from_slice(&self.nonce);
+
+        keccak256(&data)
+    }
+
+    /// Sign this cancellation.
+    pub fn sign(
+        &self,
+        signer: &super::EthereumSigner,
+        domain_separator: &[u8; 32],
+    ) -> Result<super::EthereumSignature, SignerError> {
+        let hash = eip712_signing_hash(domain_separator, &self.struct_hash());
+        signer.sign_digest(&hash)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EIP-4494: ERC-721 Permit (NFT Gasless Approve)
+// ═══════════════════════════════════════════════════════════════════
+
+/// EIP-4494 ERC-721 Permit for gasless NFT approvals.
+///
+/// Similar to EIP-2612 but for NFTs. The owner signs a permit allowing
+/// a spender to transfer a specific token ID.
+#[derive(Debug, Clone)]
+pub struct Erc721Permit {
+    /// Address being approved.
+    pub spender: [u8; 20],
+    /// Token ID to approve (as 32-byte big-endian uint256).
+    pub token_id: [u8; 32],
+    /// Current nonce for this token on the contract.
+    pub nonce: u64,
+    /// Unix timestamp deadline.
+    pub deadline: u64,
+}
+
+impl Erc721Permit {
+    /// The EIP-712 typehash for ERC-721 Permit.
+    ///
+    /// `keccak256("Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline)")`
+    #[must_use]
+    pub fn type_hash() -> [u8; 32] {
+        keccak256(b"Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline)")
+    }
+
+    /// Compute the struct hash.
+    #[must_use]
+    pub fn struct_hash(&self) -> [u8; 32] {
+        let mut data = Vec::with_capacity(5 * 32);
+        data.extend_from_slice(&Self::type_hash());
+
+        let mut spender_padded = [0u8; 32];
+        spender_padded[12..].copy_from_slice(&self.spender);
+        data.extend_from_slice(&spender_padded);
+
+        data.extend_from_slice(&self.token_id);
+
+        let mut nonce_buf = [0u8; 32];
+        nonce_buf[24..].copy_from_slice(&self.nonce.to_be_bytes());
+        data.extend_from_slice(&nonce_buf);
+
+        let mut deadline_buf = [0u8; 32];
+        deadline_buf[24..].copy_from_slice(&self.deadline.to_be_bytes());
+        data.extend_from_slice(&deadline_buf);
+
+        keccak256(&data)
+    }
+
+    /// Compute the EIP-712 signing hash.
+    #[must_use]
+    pub fn signing_hash(&self, domain_separator: &[u8; 32]) -> [u8; 32] {
+        eip712_signing_hash(domain_separator, &self.struct_hash())
+    }
+
+    /// Sign this permit.
+    pub fn sign(
+        &self,
+        signer: &super::EthereumSigner,
+        domain_separator: &[u8; 32],
+    ) -> Result<super::EthereumSignature, SignerError> {
+        let hash = self.signing_hash(domain_separator);
+        signer.sign_digest(&hash)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Multicall Encoding
+// ═══════════════════════════════════════════════════════════════════
+
+/// Encode a batch of calls for Multicall3 (`aggregate3`).
+///
+/// Multicall3 (0xcA11bde05977b3631167028862bE2a173976CA11) is deployed
+/// on virtually every EVM chain.
+///
+/// # Arguments
+/// - `calls` — list of `(target_address, allow_failure, calldata)`
+///
+/// # Returns
+/// ABI-encoded calldata for `aggregate3((address,bool,bytes)[])`
+#[must_use]
+pub fn encode_multicall3(calls: &[([u8; 20], bool, Vec<u8>)]) -> Vec<u8> {
+    use super::abi::{self, AbiValue};
+
+    // aggregate3 selector: keccak256("aggregate3((address,bool,bytes)[])")
+    let selector = &keccak256(b"aggregate3((address,bool,bytes)[])")[..4];
+
+    let call_tuples: Vec<AbiValue> = calls.iter().map(|(target, allow, cd)| {
+        AbiValue::Tuple(vec![
+            AbiValue::Address(*target),
+            AbiValue::Bool(*allow),
+            AbiValue::Bytes(cd.clone()),
+        ])
+    }).collect();
+
+    let mut calldata = Vec::new();
+    calldata.extend_from_slice(selector);
+    calldata.extend_from_slice(&abi::encode(&[AbiValue::Array(call_tuples)]));
+    calldata
+}
+
+/// The canonical Multicall3 contract address (same on all chains).
+pub const MULTICALL3_ADDRESS: [u8; 20] = [
+    0xCA, 0x11, 0xbD, 0xE0, 0x59, 0x77, 0xB3, 0x63, 0x11, 0x67,
+    0x02, 0x88, 0x62, 0xBE, 0x2A, 0x17, 0x39, 0x76, 0xCA, 0x11,
+];
+
+/// Encode a simple Multicall (`tryAggregate`) for read-only batched calls.
+///
+/// # Arguments  
+/// - `require_success` — if true, reverts on any failed call
+/// - `calls` — list of `(target_address, calldata)`
+///
+/// # Returns
+/// ABI-encoded calldata for `tryAggregate(bool,(address,bytes)[])`
+#[must_use]
+pub fn encode_try_aggregate(require_success: bool, calls: &[([u8; 20], Vec<u8>)]) -> Vec<u8> {
+    use super::abi::{self, AbiValue};
+
+    let selector = &keccak256(b"tryAggregate(bool,(address,bytes)[])")[..4];
+
+    let call_tuples: Vec<AbiValue> = calls.iter().map(|(target, cd)| {
+        AbiValue::Tuple(vec![
+            AbiValue::Address(*target),
+            AbiValue::Bytes(cd.clone()),
+        ])
+    }).collect();
+
+    let mut calldata = Vec::new();
+    calldata.extend_from_slice(selector);
+    calldata.extend_from_slice(&abi::encode(&[
+        AbiValue::Bool(require_success),
+        AbiValue::Array(call_tuples),
+    ]));
+    calldata
+}
+
+// ─── Internal Helper ───────────────────────────────────────────────
+
+fn eip712_signing_hash(domain_separator: &[u8; 32], struct_hash: &[u8; 32]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(2 + 32 + 32);
+    buf.push(0x19);
+    buf.push(0x01);
+    buf.extend_from_slice(domain_separator);
+    buf.extend_from_slice(struct_hash);
+    keccak256(&buf)
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════
 
@@ -624,4 +960,154 @@ mod tests {
         let path = bls_paths::withdrawal(5);
         assert_eq!(path, vec![12381, 3600, 5, 0]);
     }
+
+    // ─── EIP-3009 TransferWithAuthorization ────────────────────────
+
+    #[test]
+    fn test_transfer_auth_type_hash() {
+        // Known type hash from USDC
+        let hash = TransferWithAuthorization::type_hash();
+        assert_eq!(
+            hex::encode(hash),
+            "7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267"
+        );
+    }
+
+    #[test]
+    fn test_receive_auth_type_hash() {
+        let hash = ReceiveWithAuthorization::type_hash();
+        assert_eq!(
+            hex::encode(hash),
+            "d099cc98ef71107a616c4f0f941f04c322d8e254fe26b3c6668db87aae413de8"
+        );
+    }
+
+    #[test]
+    fn test_cancel_auth_type_hash() {
+        let hash = CancelAuthorization::type_hash();
+        assert_eq!(
+            hex::encode(hash),
+            "158b0a9edf7a828aad02f63cd515c68ef2f50ba807396f6d12842833a1597429"
+        );
+    }
+
+    #[test]
+    fn test_transfer_auth_sign() {
+        let signer = super::super::EthereumSigner::generate().unwrap();
+        let auth = TransferWithAuthorization {
+            from: signer.address(),
+            to: [0xBB; 20],
+            value: { let mut v = [0u8;32]; v[31] = 100; v },
+            valid_after: 0,
+            valid_before: u64::MAX,
+            nonce: [0x42; 32],
+        };
+        let domain = [0xCC; 32];
+        let sig = auth.sign(&signer, &domain).unwrap();
+        assert!(sig.v == 27 || sig.v == 28);
+    }
+
+    #[test]
+    fn test_cancel_auth_sign() {
+        let signer = super::super::EthereumSigner::generate().unwrap();
+        let cancel = CancelAuthorization {
+            authorizer: signer.address(),
+            nonce: [0xFF; 32],
+        };
+        let domain = [0xCC; 32];
+        let sig = cancel.sign(&signer, &domain).unwrap();
+        assert!(sig.v == 27 || sig.v == 28);
+    }
+
+    #[test]
+    fn test_transfer_auth_different_nonce_different_hash() {
+        let auth1 = TransferWithAuthorization {
+            from: [0xAA;20], to: [0xBB;20], value: [0;32],
+            valid_after: 0, valid_before: u64::MAX, nonce: [0x01;32],
+        };
+        let auth2 = TransferWithAuthorization {
+            nonce: [0x02;32], ..auth1.clone()
+        };
+        assert_ne!(auth1.struct_hash(), auth2.struct_hash());
+    }
+
+    // ─── EIP-4494 ERC-721 Permit ───────────────────────────────────
+
+    #[test]
+    fn test_erc721_permit_type_hash() {
+        let hash = Erc721Permit::type_hash();
+        // Known: keccak256("Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline)")
+        assert_eq!(
+            hex::encode(hash),
+            "49ecf333e5b8c95c40fdafc95c1ad136e8914a8fb55e9dc8bb01eaa83a2df9ad"
+        );
+    }
+
+    #[test]
+    fn test_erc721_permit_sign() {
+        let signer = super::super::EthereumSigner::generate().unwrap();
+        let permit = Erc721Permit {
+            spender: [0xBB; 20],
+            token_id: { let mut t = [0u8;32]; t[31] = 1; t }, // tokenId = 1
+            nonce: 0,
+            deadline: u64::MAX,
+        };
+        let domain = [0xCC; 32];
+        let sig = permit.sign(&signer, &domain).unwrap();
+        assert_eq!(sig.r.len(), 32);
+    }
+
+    #[test]
+    fn test_erc721_permit_different_token_id() {
+        let perm1 = Erc721Permit {
+            spender: [0xBB;20], token_id: { let mut t=[0u8;32]; t[31]=1; t },
+            nonce: 0, deadline: u64::MAX,
+        };
+        let perm2 = Erc721Permit {
+            token_id: { let mut t=[0u8;32]; t[31]=2; t }, ..perm1.clone()
+        };
+        assert_ne!(perm1.struct_hash(), perm2.struct_hash());
+    }
+
+    // ─── Multicall ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_multicall3_encode() {
+        let calls = vec![
+            ([0xAA; 20], false, vec![0x01, 0x02, 0x03]),
+            ([0xBB; 20], true, vec![0x04, 0x05]),
+        ];
+        let calldata = encode_multicall3(&calls);
+        // First 4 bytes: aggregate3 selector
+        let expected_selector = &keccak256(b"aggregate3((address,bool,bytes)[])")[..4];
+        assert_eq!(&calldata[..4], expected_selector);
+        assert!(calldata.len() > 4);
+    }
+
+    #[test]
+    fn test_multicall3_empty() {
+        let calldata = encode_multicall3(&[]);
+        let expected_selector = &keccak256(b"aggregate3((address,bool,bytes)[])")[..4];
+        assert_eq!(&calldata[..4], expected_selector);
+    }
+
+    #[test]
+    fn test_try_aggregate_encode() {
+        let calls = vec![
+            ([0xAA; 20], vec![0x01, 0x02]),
+        ];
+        let calldata = encode_try_aggregate(true, &calls);
+        let expected_selector = &keccak256(b"tryAggregate(bool,(address,bytes)[])")[..4];
+        assert_eq!(&calldata[..4], expected_selector);
+    }
+
+    #[test]
+    fn test_multicall3_address() {
+        // Canonical Multicall3 address
+        assert_eq!(
+            hex::encode(MULTICALL3_ADDRESS).to_lowercase(),
+            "ca11bde05977b3631167028862be2a173976ca11"
+        );
+    }
 }
+

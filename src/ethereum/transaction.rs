@@ -454,7 +454,325 @@ fn strip_leading_zeros(data: &[u8; 32]) -> Vec<u8> {
     data[start..].to_vec()
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────
+// ─── Signed Transaction Decoding ───────────────────────────────────
+
+/// The type of an Ethereum transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxType {
+    /// Pre-EIP-2718 legacy transaction.
+    Legacy,
+    /// EIP-2930 (Type 1) — access list transaction.
+    Type1AccessList,
+    /// EIP-1559 (Type 2) — dynamic fee transaction.
+    Type2DynamicFee,
+    /// EIP-4844 (Type 3) — blob transaction.
+    Type3Blob,
+}
+
+/// A decoded signed Ethereum transaction.
+#[derive(Debug, Clone)]
+pub struct DecodedTransaction {
+    /// Transaction type.
+    pub tx_type: TxType,
+    /// Chain ID.
+    pub chain_id: u64,
+    /// Sender nonce.
+    pub nonce: u64,
+    /// Recipient address (`None` for contract creation).
+    pub to: Option<[u8; 20]>,
+    /// Value in wei (as raw bytes, big-endian).
+    pub value: Vec<u8>,
+    /// Calldata.
+    pub data: Vec<u8>,
+    /// Gas limit.
+    pub gas_limit: u64,
+    /// Gas price (Legacy/Type 1) or max_fee_per_gas (Type 2/3).
+    pub gas_price_or_max_fee: Vec<u8>,
+    /// Max priority fee per gas (Type 2/3 only, empty for Legacy/Type 1).
+    pub max_priority_fee: Vec<u8>,
+    /// Signature v / y_parity.
+    pub v: u64,
+    /// Signature r (32 bytes).
+    pub r: [u8; 32],
+    /// Signature s (32 bytes).
+    pub s: [u8; 32],
+    /// Recovered signer address (20 bytes).
+    pub from: [u8; 20],
+    /// Transaction hash.
+    pub tx_hash: [u8; 32],
+}
+
+/// Decode a signed transaction from raw bytes and recover the signer.
+///
+/// Supports Legacy, Type 1 (EIP-2930), Type 2 (EIP-1559), and Type 3 (EIP-4844).
+///
+/// # Example
+/// ```no_run
+/// use trad_signer::ethereum::transaction::decode_signed_tx;
+///
+/// fn example(raw_tx: &[u8]) {
+///     let decoded = decode_signed_tx(raw_tx).unwrap();
+///     println!("From: 0x{}", hex::encode(decoded.from));
+///     println!("Type: {:?}", decoded.tx_type);
+///     println!("Nonce: {}", decoded.nonce);
+/// }
+/// ```
+pub fn decode_signed_tx(raw: &[u8]) -> Result<DecodedTransaction, SignerError> {
+    if raw.is_empty() {
+        return Err(SignerError::ParseError("empty transaction".into()));
+    }
+
+    let tx_hash = keccak256(raw);
+
+    match raw[0] {
+        // EIP-2718 typed transactions: first byte < 0x7F
+        0x01 => decode_type1_tx(raw, tx_hash),
+        0x02 => decode_type2_tx(raw, tx_hash),
+        0x03 => decode_type3_tx(raw, tx_hash),
+        // Legacy: first byte >= 0xC0 (RLP list prefix)
+        0xC0..=0xFF => decode_legacy_tx(raw, tx_hash),
+        b => Err(SignerError::ParseError(format!("unknown tx type byte: 0x{b:02x}"))),
+    }
+}
+
+fn decode_legacy_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, SignerError> {
+    let items = rlp::decode_list_items(raw)?;
+    if items.len() != 9 {
+        return Err(SignerError::ParseError(format!("legacy tx: expected 9 RLP items, got {}", items.len())));
+    }
+
+    let nonce = items[0].as_u64()?;
+    let gas_price = items[1].as_bytes()?.to_vec();
+    let gas_limit = items[2].as_u64()?;
+    let to_bytes = items[3].as_bytes()?;
+    let to = if to_bytes.len() == 20 {
+        let mut addr = [0u8; 20];
+        addr.copy_from_slice(to_bytes);
+        Some(addr)
+    } else { None };
+    let value = items[4].as_bytes()?.to_vec();
+    let data = items[5].as_bytes()?.to_vec();
+    let v = items[6].as_u64()?;
+    let r = pad_to_32(items[7].as_bytes()?);
+    let s = pad_to_32(items[8].as_bytes()?);
+
+    // EIP-155: chain_id = (v - 35) / 2
+    let chain_id = if v >= 35 { (v - 35) / 2 } else { 0 };
+    let recovery_id = if v >= 35 { (v - 35) % 2 } else { v - 27 };
+
+    // Reconstruct signing payload for ecrecover
+    let mut sign_items = Vec::new();
+    sign_items.extend_from_slice(&rlp::encode_u64(nonce));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&gas_price));
+    sign_items.extend_from_slice(&rlp::encode_u64(gas_limit));
+    sign_items.extend_from_slice(&encode_address(&to));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&value));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&data));
+    if chain_id > 0 {
+        sign_items.extend_from_slice(&rlp::encode_u64(chain_id));
+        sign_items.extend_from_slice(&rlp::encode_u64(0));
+        sign_items.extend_from_slice(&rlp::encode_u64(0));
+    }
+    let signing_hash = keccak256(&rlp::encode_list(&sign_items));
+
+    let from = recover_signer(&signing_hash, &r, &s, recovery_id as u8)?;
+
+    Ok(DecodedTransaction {
+        tx_type: TxType::Legacy,
+        chain_id,
+        nonce,
+        to,
+        value,
+        data,
+        gas_limit,
+        gas_price_or_max_fee: gas_price,
+        max_priority_fee: vec![],
+        v,
+        r, s, from, tx_hash,
+    })
+}
+
+fn decode_type1_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, SignerError> {
+    let items = rlp::decode_list_items(&raw[1..])?;
+    if items.len() != 11 {
+        return Err(SignerError::ParseError(format!("type1 tx: expected 11 items, got {}", items.len())));
+    }
+
+    let chain_id = items[0].as_u64()?;
+    let nonce = items[1].as_u64()?;
+    let gas_price = items[2].as_bytes()?.to_vec();
+    let gas_limit = items[3].as_u64()?;
+    let to_bytes = items[4].as_bytes()?;
+    let to = if to_bytes.len() == 20 { let mut a=[0u8;20]; a.copy_from_slice(to_bytes); Some(a) } else { None };
+    let value = items[5].as_bytes()?.to_vec();
+    let data = items[6].as_bytes()?.to_vec();
+    // items[7] = access_list (skip for decode)
+    let y_parity = items[8].as_u64()?;
+    let r = pad_to_32(items[9].as_bytes()?);
+    let s = pad_to_32(items[10].as_bytes()?);
+
+    // Reconstruct signing hash
+    let mut sign_items = Vec::new();
+    sign_items.extend_from_slice(&rlp::encode_u64(chain_id));
+    sign_items.extend_from_slice(&rlp::encode_u64(nonce));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&gas_price));
+    sign_items.extend_from_slice(&rlp::encode_u64(gas_limit));
+    sign_items.extend_from_slice(&encode_address(&to));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&value));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&data));
+    // Re-encode the access list from the decoded items
+    sign_items.extend_from_slice(&re_encode_rlp_item(&items[7]));
+    let mut payload = vec![0x01];
+    payload.extend_from_slice(&rlp::encode_list(&sign_items));
+    let signing_hash = keccak256(&payload);
+
+    let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
+
+    Ok(DecodedTransaction {
+        tx_type: TxType::Type1AccessList,
+        chain_id, nonce, to, value, data, gas_limit,
+        gas_price_or_max_fee: gas_price,
+        max_priority_fee: vec![],
+        v: y_parity, r, s, from, tx_hash,
+    })
+}
+
+fn decode_type2_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, SignerError> {
+    let items = rlp::decode_list_items(&raw[1..])?;
+    if items.len() != 12 {
+        return Err(SignerError::ParseError(format!("type2 tx: expected 12 items, got {}", items.len())));
+    }
+
+    let chain_id = items[0].as_u64()?;
+    let nonce = items[1].as_u64()?;
+    let max_priority_fee = items[2].as_bytes()?.to_vec();
+    let max_fee = items[3].as_bytes()?.to_vec();
+    let gas_limit = items[4].as_u64()?;
+    let to_bytes = items[5].as_bytes()?;
+    let to = if to_bytes.len() == 20 { let mut a=[0u8;20]; a.copy_from_slice(to_bytes); Some(a) } else { None };
+    let value = items[6].as_bytes()?.to_vec();
+    let data = items[7].as_bytes()?.to_vec();
+    // items[8] = access_list
+    let y_parity = items[9].as_u64()?;
+    let r = pad_to_32(items[10].as_bytes()?);
+    let s = pad_to_32(items[11].as_bytes()?);
+
+    // Reconstruct signing hash
+    let mut sign_items = Vec::new();
+    sign_items.extend_from_slice(&rlp::encode_u64(chain_id));
+    sign_items.extend_from_slice(&rlp::encode_u64(nonce));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&max_priority_fee));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&max_fee));
+    sign_items.extend_from_slice(&rlp::encode_u64(gas_limit));
+    sign_items.extend_from_slice(&encode_address(&to));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&value));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&data));
+    sign_items.extend_from_slice(&re_encode_rlp_item(&items[8]));
+    let mut payload = vec![0x02];
+    payload.extend_from_slice(&rlp::encode_list(&sign_items));
+    let signing_hash = keccak256(&payload);
+
+    let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
+
+    Ok(DecodedTransaction {
+        tx_type: TxType::Type2DynamicFee,
+        chain_id, nonce, to, value, data, gas_limit,
+        gas_price_or_max_fee: max_fee,
+        max_priority_fee,
+        v: y_parity, r, s, from, tx_hash,
+    })
+}
+
+fn decode_type3_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, SignerError> {
+    let items = rlp::decode_list_items(&raw[1..])?;
+    if items.len() != 14 {
+        return Err(SignerError::ParseError(format!("type3 tx: expected 14 items, got {}", items.len())));
+    }
+
+    let chain_id = items[0].as_u64()?;
+    let nonce = items[1].as_u64()?;
+    let max_priority_fee = items[2].as_bytes()?.to_vec();
+    let max_fee = items[3].as_bytes()?.to_vec();
+    let gas_limit = items[4].as_u64()?;
+    let to_bytes = items[5].as_bytes()?;
+    let to = if to_bytes.len() == 20 { let mut a=[0u8;20]; a.copy_from_slice(to_bytes); Some(a) } else { None };
+    let value = items[6].as_bytes()?.to_vec();
+    let data = items[7].as_bytes()?.to_vec();
+    // items[8] = access_list, items[9] = max_fee_per_blob_gas, items[10] = blob_hashes
+    let y_parity = items[11].as_u64()?;
+    let r = pad_to_32(items[12].as_bytes()?);
+    let s = pad_to_32(items[13].as_bytes()?);
+
+    // Reconstruct signing hash
+    let mut sign_items = Vec::new();
+    sign_items.extend_from_slice(&rlp::encode_u64(chain_id));
+    sign_items.extend_from_slice(&rlp::encode_u64(nonce));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&max_priority_fee));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&max_fee));
+    sign_items.extend_from_slice(&rlp::encode_u64(gas_limit));
+    sign_items.extend_from_slice(&encode_address(&to));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&value));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&data));
+    sign_items.extend_from_slice(&re_encode_rlp_item(&items[8]));
+    sign_items.extend_from_slice(&re_encode_rlp_item(&items[9]));
+    sign_items.extend_from_slice(&re_encode_rlp_item(&items[10]));
+    let mut payload = vec![0x03];
+    payload.extend_from_slice(&rlp::encode_list(&sign_items));
+    let signing_hash = keccak256(&payload);
+
+    let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
+
+    Ok(DecodedTransaction {
+        tx_type: TxType::Type3Blob,
+        chain_id, nonce, to, value, data, gas_limit,
+        gas_price_or_max_fee: max_fee,
+        max_priority_fee,
+        v: y_parity, r, s, from, tx_hash,
+    })
+}
+
+/// Re-encode a decoded RLP item back to bytes.
+fn re_encode_rlp_item(item: &rlp::RlpItem) -> Vec<u8> {
+    match item {
+        rlp::RlpItem::Bytes(b) => rlp::encode_bytes(b),
+        rlp::RlpItem::List(items) => {
+            let mut inner = Vec::new();
+            for i in items {
+                inner.extend_from_slice(&re_encode_rlp_item(i));
+            }
+            rlp::encode_list(&inner)
+        }
+    }
+}
+
+/// Recover the signer address from a message hash and ECDSA signature.
+fn recover_signer(hash: &[u8; 32], r: &[u8; 32], s: &[u8; 32], recovery_id: u8) -> Result<[u8; 20], SignerError> {
+    use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
+
+    let mut sig_bytes = [0u8; 64];
+    sig_bytes[..32].copy_from_slice(r);
+    sig_bytes[32..].copy_from_slice(s);
+    let sig = K256Signature::from_bytes((&sig_bytes).into())
+        .map_err(|e| SignerError::InvalidSignature(format!("invalid sig: {e}")))?;
+    let rid = RecoveryId::new(recovery_id & 1 != 0, false);
+    let key = VerifyingKey::recover_from_prehash(hash, &sig, rid)
+        .map_err(|e| SignerError::InvalidSignature(format!("ecrecover: {e}")))?;
+
+    let uncompressed = key.to_encoded_point(false);
+    let pub_bytes = &uncompressed.as_bytes()[1..]; // skip 0x04 prefix
+    let addr_hash = keccak256(pub_bytes);
+    let mut addr = [0u8; 20];
+    addr.copy_from_slice(&addr_hash[12..]);
+    Ok(addr)
+}
+
+fn pad_to_32(data: &[u8]) -> [u8; 32] {
+    let mut buf = [0u8; 32];
+    if data.len() <= 32 {
+        buf[32 - data.len()..].copy_from_slice(data);
+    }
+    buf
+}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -669,5 +987,154 @@ mod tests {
         let signed = tx.sign(&signer).unwrap();
         let expected = keccak256(signed.raw_tx());
         assert_eq!(signed.tx_hash(), expected);
+    }
+
+    // ─── Signed Transaction Decoding Tests ─────────────────────────
+
+    #[test]
+    fn test_decode_legacy_roundtrip() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = LegacyTransaction {
+            nonce: 7,
+            gas_price: 20_000_000_000,
+            gas_limit: 21_000,
+            to: Some([0xBB; 20]),
+            value: 1_000_000_000_000_000_000,
+            data: vec![0xAB, 0xCD],
+            chain_id: 1,
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let decoded = decode_signed_tx(signed.raw_tx()).unwrap();
+
+        assert_eq!(decoded.tx_type, TxType::Legacy);
+        assert_eq!(decoded.chain_id, 1);
+        assert_eq!(decoded.nonce, 7);
+        assert_eq!(decoded.gas_limit, 21_000);
+        assert_eq!(decoded.to, Some([0xBB; 20]));
+        assert_eq!(decoded.data, vec![0xAB, 0xCD]);
+        assert_eq!(decoded.from, signer.address());
+        assert_eq!(decoded.tx_hash, signed.tx_hash());
+    }
+
+    #[test]
+    fn test_decode_type1_roundtrip() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = EIP2930Transaction {
+            chain_id: 1,
+            nonce: 3,
+            gas_price: 30_000_000_000,
+            gas_limit: 50_000,
+            to: Some([0xCC; 20]),
+            value: 0,
+            data: vec![0x01],
+            access_list: vec![([0xDD; 20], vec![[0xEE; 32]])],
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let decoded = decode_signed_tx(signed.raw_tx()).unwrap();
+
+        assert_eq!(decoded.tx_type, TxType::Type1AccessList);
+        assert_eq!(decoded.chain_id, 1);
+        assert_eq!(decoded.nonce, 3);
+        assert_eq!(decoded.from, signer.address());
+    }
+
+    #[test]
+    fn test_decode_type2_roundtrip() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = EIP1559Transaction {
+            chain_id: 1,
+            nonce: 42,
+            max_priority_fee_per_gas: 2_000_000_000,
+            max_fee_per_gas: 100_000_000_000,
+            gas_limit: 21_000,
+            to: Some([0xAA; 20]),
+            value: 500_000_000_000_000,
+            data: vec![],
+            access_list: vec![],
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let decoded = decode_signed_tx(signed.raw_tx()).unwrap();
+
+        assert_eq!(decoded.tx_type, TxType::Type2DynamicFee);
+        assert_eq!(decoded.chain_id, 1);
+        assert_eq!(decoded.nonce, 42);
+        assert_eq!(decoded.gas_limit, 21_000);
+        assert_eq!(decoded.to, Some([0xAA; 20]));
+        assert_eq!(decoded.from, signer.address());
+        assert_eq!(decoded.tx_hash, signed.tx_hash());
+    }
+
+    #[test]
+    fn test_decode_type3_roundtrip() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = EIP4844Transaction {
+            chain_id: 1,
+            nonce: 0,
+            max_priority_fee_per_gas: 1_000_000_000,
+            max_fee_per_gas: 50_000_000_000,
+            gas_limit: 100_000,
+            to: [0xFF; 20],
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+            max_fee_per_blob_gas: 1_000_000_000,
+            blob_versioned_hashes: vec![[0x01; 32]],
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let decoded = decode_signed_tx(signed.raw_tx()).unwrap();
+
+        assert_eq!(decoded.tx_type, TxType::Type3Blob);
+        assert_eq!(decoded.from, signer.address());
+        assert_eq!(decoded.chain_id, 1);
+    }
+
+    #[test]
+    fn test_decode_contract_creation() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = LegacyTransaction {
+            nonce: 0,
+            gas_price: 20_000_000_000,
+            gas_limit: 1_000_000,
+            to: None,
+            value: 0,
+            data: vec![0x60, 0x00],
+            chain_id: 1,
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let decoded = decode_signed_tx(signed.raw_tx()).unwrap();
+
+        assert_eq!(decoded.to, None, "contract creation has no 'to'");
+        assert_eq!(decoded.from, signer.address());
+    }
+
+    #[test]
+    fn test_decode_empty_tx_rejected() {
+        assert!(decode_signed_tx(&[]).is_err());
+    }
+
+    #[test]
+    fn test_decode_unknown_type_rejected() {
+        assert!(decode_signed_tx(&[0x04, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_decode_signer_matches_across_types() {
+        // Same signer, same nonce → different tx types should all recover same address
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let expected_addr = signer.address();
+
+        let legacy = LegacyTransaction {
+            nonce: 0, gas_price: 1, gas_limit: 21000,
+            to: Some([0xAA;20]), value: 0, data: vec![], chain_id: 1,
+        }.sign(&signer).unwrap();
+
+        let type2 = EIP1559Transaction {
+            chain_id: 1, nonce: 0, max_priority_fee_per_gas: 1,
+            max_fee_per_gas: 1, gas_limit: 21000,
+            to: Some([0xAA;20]), value: 0, data: vec![], access_list: vec![],
+        }.sign(&signer).unwrap();
+
+        assert_eq!(decode_signed_tx(legacy.raw_tx()).unwrap().from, expected_addr);
+        assert_eq!(decode_signed_tx(type2.raw_tx()).unwrap().from, expected_addr);
     }
 }
