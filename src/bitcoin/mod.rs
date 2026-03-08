@@ -4,6 +4,9 @@
 //! strict DER-encoded signature output, and double-SHA-256 hashing.
 
 pub mod schnorr;
+pub mod message;
+pub mod taproot;
+pub mod tapscript;
 
 use crate::error::SignerError;
 use crate::traits;

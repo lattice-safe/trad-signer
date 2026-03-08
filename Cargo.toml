@@ -20,6 +20,9 @@ default = [
     "bls",
     "hd_key",
     "mnemonic",
+    "bip85",
+    "psbt",
+    "descriptor",
     "frost",
     "musig2",
 ]
@@ -41,6 +44,9 @@ hd_key = ["dep:k256", "dep:sha2", "dep:hmac", "dep:ripemd"]
 mnemonic = ["dep:sha2", "dep:hmac", "dep:pbkdf2", "hd_key"]
 frost = ["dep:k256", "dep:sha2"]
 musig2 = ["dep:k256", "dep:sha2"]
+bip85 = ["hd_key", "dep:sha2", "dep:hmac"]
+psbt = ["dep:sha2"]
+descriptor = ["dep:sha2", "dep:ripemd"]
 
 [dependencies]
 # ECDSA curves

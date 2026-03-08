@@ -38,5 +38,14 @@ pub mod hd_key;
 #[cfg(feature = "mnemonic")]
 pub mod mnemonic;
 
+#[cfg(feature = "bip85")]
+pub mod bip85;
+
+#[cfg(feature = "psbt")]
+pub mod psbt;
+
+#[cfg(feature = "descriptor")]
+pub mod descriptor;
+
 #[cfg(any(feature = "frost", feature = "musig2"))]
 pub mod threshold;
