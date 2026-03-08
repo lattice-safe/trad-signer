@@ -1,4 +1,4 @@
-//! # trad-signer
+//! # chains-sdk
 //!
 //! Unified, secure multi-chain signing library for ECDSA, EdDSA, BLS, and Schnorr.
 //!

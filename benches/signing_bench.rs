@@ -1,12 +1,12 @@
-//! Benchmarks for trad-signer signing operations.
+//! Benchmarks for chains-sdk signing operations.
 //!
 //! Run with: `cargo bench --all-features`
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn bench_ethereum(c: &mut Criterion) {
-    use trad_signer::ethereum::{EthereumSigner, EthereumVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::ethereum::{EthereumSigner, EthereumVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = EthereumSigner::generate().unwrap();
     let verifier = EthereumVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -28,8 +28,8 @@ fn bench_ethereum(c: &mut Criterion) {
 }
 
 fn bench_bitcoin(c: &mut Criterion) {
-    use trad_signer::bitcoin::{BitcoinSigner, BitcoinVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bitcoin::{BitcoinSigner, BitcoinVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = BitcoinSigner::generate().unwrap();
     let verifier = BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -48,8 +48,8 @@ fn bench_bitcoin(c: &mut Criterion) {
 }
 
 fn bench_schnorr(c: &mut Criterion) {
-    use trad_signer::bitcoin::schnorr::{SchnorrSigner, SchnorrVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bitcoin::schnorr::{SchnorrSigner, SchnorrVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = SchnorrSigner::generate().unwrap();
     let verifier = SchnorrVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -68,8 +68,8 @@ fn bench_schnorr(c: &mut Criterion) {
 }
 
 fn bench_solana(c: &mut Criterion) {
-    use trad_signer::solana::{SolanaSigner, SolanaVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::solana::{SolanaSigner, SolanaVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = SolanaSigner::generate().unwrap();
     let verifier = SolanaVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -88,8 +88,8 @@ fn bench_solana(c: &mut Criterion) {
 }
 
 fn bench_bls(c: &mut Criterion) {
-    use trad_signer::bls::{aggregate_signatures, verify_aggregated, BlsSigner, BlsVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bls::{aggregate_signatures, verify_aggregated, BlsSigner, BlsVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = BlsSigner::generate().unwrap();
     let verifier = BlsVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -119,7 +119,7 @@ fn bench_bls(c: &mut Criterion) {
 }
 
 fn bench_bls_threshold(c: &mut Criterion) {
-    use trad_signer::bls::threshold;
+    use chains_sdk::bls::threshold;
 
     let kgen = threshold::threshold_keygen(2, 3).unwrap();
     let msg = b"bls threshold bench";
@@ -141,7 +141,7 @@ fn bench_bls_threshold(c: &mut Criterion) {
 }
 
 fn bench_bls_eip2333(c: &mut Criterion) {
-    use trad_signer::bls::eip2333;
+    use chains_sdk::bls::eip2333;
 
     let seed = [0xABu8; 64];
     let master = eip2333::derive_master_sk(&seed).unwrap();
@@ -179,8 +179,8 @@ criterion_group!(
 criterion_main!(benches);
 
 fn bench_xrp(c: &mut Criterion) {
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
-    use trad_signer::xrp::{XrpEcdsaSigner, XrpEcdsaVerifier, XrpEddsaSigner, XrpEddsaVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::xrp::{XrpEcdsaSigner, XrpEcdsaVerifier, XrpEddsaSigner, XrpEddsaVerifier};
 
     let msg = b"benchmark message for xrp";
 
@@ -218,8 +218,8 @@ fn bench_xrp(c: &mut Criterion) {
 }
 
 fn bench_neo(c: &mut Criterion) {
-    use trad_signer::neo::{NeoSigner, NeoVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::neo::{NeoSigner, NeoVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let signer = NeoSigner::generate().unwrap();
     let verifier = NeoVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
@@ -236,7 +236,7 @@ fn bench_neo(c: &mut Criterion) {
 }
 
 fn bench_hd_key(c: &mut Criterion) {
-    use trad_signer::hd_key::{DerivationPath, ExtendedPrivateKey};
+    use chains_sdk::hd_key::{DerivationPath, ExtendedPrivateKey};
 
     let seed = [0x42u8; 64];
     let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
@@ -258,7 +258,7 @@ fn bench_hd_key(c: &mut Criterion) {
 }
 
 fn bench_musig2(c: &mut Criterion) {
-    use trad_signer::threshold::musig2::signing::*;
+    use chains_sdk::threshold::musig2::signing::*;
 
     let sk1 = [0x11u8; 32];
     let sk2 = [0x22u8; 32];
@@ -281,7 +281,7 @@ fn bench_musig2(c: &mut Criterion) {
 }
 
 fn bench_frost(c: &mut Criterion) {
-    use trad_signer::threshold::frost::{keygen, signing};
+    use chains_sdk::threshold::frost::{keygen, signing};
 
     let secret = [0x42u8; 32];
     let kgen = keygen::trusted_dealer_keygen(&secret, 2, 3).unwrap();
@@ -302,7 +302,7 @@ fn bench_frost(c: &mut Criterion) {
 }
 
 fn bench_mnemonic(c: &mut Criterion) {
-    use trad_signer::mnemonic::Mnemonic;
+    use chains_sdk::mnemonic::Mnemonic;
 
     c.bench_function("mnemonic_generate_12", |b| {
         b.iter(|| Mnemonic::generate(12).unwrap())
@@ -316,9 +316,9 @@ fn bench_mnemonic(c: &mut Criterion) {
 // ─── NEW: Sighash benchmarks ───────────────────────────────────────
 
 fn bench_sighash(c: &mut Criterion) {
-    use trad_signer::bitcoin::sighash;
-    use trad_signer::bitcoin::tapscript::SighashType;
-    use trad_signer::bitcoin::transaction::*;
+    use chains_sdk::bitcoin::sighash;
+    use chains_sdk::bitcoin::tapscript::SighashType;
+    use chains_sdk::bitcoin::transaction::*;
 
     // Build a realistic 2-input, 2-output transaction
     let mut tx = Transaction::new(2);
@@ -396,7 +396,7 @@ fn bench_sighash(c: &mut Criterion) {
 // ─── NEW: Transaction serialization benchmarks ─────────────────────
 
 fn bench_transaction(c: &mut Criterion) {
-    use trad_signer::bitcoin::transaction::*;
+    use chains_sdk::bitcoin::transaction::*;
 
     // 2-in, 2-out transaction with witness
     let mut tx = Transaction::new(2);
@@ -440,7 +440,7 @@ fn bench_transaction(c: &mut Criterion) {
 // ─── NEW: ExtendedPublicKey + address benchmarks ───────────────────
 
 fn bench_xpub(c: &mut Criterion) {
-    use trad_signer::hd_key::ExtendedPrivateKey;
+    use chains_sdk::hd_key::ExtendedPrivateKey;
 
     let seed = [0x42u8; 64];
     let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
@@ -454,7 +454,7 @@ fn bench_xpub(c: &mut Criterion) {
         b.iter(|| black_box(xpub.to_xpub()))
     });
     c.bench_function("xpub_from_xpub_string", |b| {
-        b.iter(|| trad_signer::hd_key::ExtendedPublicKey::from_xpub(black_box(&xpub_str)).unwrap())
+        b.iter(|| chains_sdk::hd_key::ExtendedPublicKey::from_xpub(black_box(&xpub_str)).unwrap())
     });
     c.bench_function("xpub_p2wpkh_address", |b| {
         b.iter(|| xpub.p2wpkh_address(black_box("bc")).unwrap())

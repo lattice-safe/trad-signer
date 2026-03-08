@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use trad_signer::ethereum::{EthereumSigner, EthereumVerifier, EthereumSignature};
-use trad_signer::traits::{KeyPair, Signer, Verifier};
+use chains_sdk::ethereum::{EthereumSigner, EthereumVerifier, EthereumSignature};
+use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
 fuzz_target!(|data: &[u8]| {
     // Fuzz signing: any message should sign without panic

@@ -1,11 +1,11 @@
 [package]
-name = "trad-signer"
+name = "chains-sdk"
 version = "0.7.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 description = "Unified, secure multi-chain signing library for ECDSA, EdDSA, BLS, and Schnorr"
-repository = "https://github.com/lattice-safe/trad-signer"
+repository = "https://github.com/lattice-safe/chains-sdk"
 keywords = ["crypto", "blockchain", "signing", "ecdsa", "bls"]
 categories = ["cryptography"]
 
@@ -103,5 +103,5 @@ name = "security_bench"
 harness = false
 
 [[bin]]
-name = "trad-signer"
-path = "src/bin/trad_signer.rs"
+name = "chains-sdk"
+path = "src/bin/chains_sdk.rs"

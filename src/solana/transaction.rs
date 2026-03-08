@@ -10,9 +10,9 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::solana::transaction::*;
-//! use trad_signer::solana::SolanaSigner;
-//! use trad_signer::traits::KeyPair;
+//! use chains_sdk::solana::transaction::*;
+//! use chains_sdk::solana::SolanaSigner;
+//! use chains_sdk::traits::KeyPair;
 //!
 //! fn example() -> Result<(), Box<dyn std::error::Error>> {
 //!     let signer = SolanaSigner::generate()?;
@@ -924,7 +924,7 @@ impl VersionedTransaction {
 ///
 /// # Example
 /// ```
-/// use trad_signer::solana::transaction::find_program_address;
+/// use chains_sdk::solana::transaction::find_program_address;
 ///
 /// let program_id = [0xAA; 32];
 /// let (pda, bump) = find_program_address(&[b"vault", &[1u8; 32]], &program_id).unwrap();
@@ -1115,7 +1115,7 @@ impl Transaction {
 ///
 /// # Example
 /// ```
-/// use trad_signer::solana::transaction::InstructionDataBuilder;
+/// use chains_sdk::solana::transaction::InstructionDataBuilder;
 ///
 /// let data = InstructionDataBuilder::new()
 ///     .write_u8(1)                    // discriminator

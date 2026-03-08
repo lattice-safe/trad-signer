@@ -6,7 +6,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::bitcoin::taproot::{TapTree, TapLeaf};
+//! use chains_sdk::bitcoin::taproot::{TapTree, TapLeaf};
 //!
 //! // Build a TapTree with two spending scripts
 //! let leaf1 = TapLeaf::new(0xC0, vec![0x51]); // OP_TRUE

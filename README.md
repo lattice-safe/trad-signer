@@ -1,9 +1,9 @@
-# trad-signer
+# chains-sdk
 
 **Unified, secure multi-chain signing SDK for Rust.** Supports ECDSA (secp256k1, P-256), EdDSA (Ed25519), BLS12-381 (including threshold), Schnorr (BIP-340), FROST threshold signatures (RFC 9591), and MuSig2 multi-party signatures (BIP-327) — with BIP-32/39/44 HD key derivation, address generation, full serde support, and a CLI tool.
 
-[![Crates.io](https://img.shields.io/crates/v/trad-signer.svg)](https://crates.io/crates/trad-signer)
-[![License](https://img.shields.io/crates/l/trad-signer.svg)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/chains-sdk.svg)](https://crates.io/crates/chains-sdk)
+[![License](https://img.shields.io/crates/l/chains-sdk.svg)](LICENSE)
 
 ## Supported Algorithms
 
@@ -22,7 +22,7 @@
 
 ```toml
 [dependencies]
-trad-signer = "0.7"
+chains-sdk = "0.7"
 ```
 
 ---
@@ -30,8 +30,8 @@ trad-signer = "0.7"
 ## Ethereum (secp256k1 ECDSA)
 
 ```rust
-use trad_signer::ethereum::EthereumSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::ethereum::EthereumSigner;
+use chains_sdk::traits::{KeyPair, Signer};
 
 // Generate a new key pair
 let signer = EthereumSigner::generate()?;
@@ -48,7 +48,7 @@ let sig = signer.sign_with_chain_id(b"tx data", 1)?;   // Mainnet
 let sig = signer.sign_with_chain_id(b"tx data", 137)?;  // Polygon
 
 // ecrecover (recover address from signature)
-use trad_signer::ethereum::ecrecover;
+use chains_sdk::ethereum::ecrecover;
 let recovered = ecrecover(b"hello world", &sig)?;
 assert_eq!(recovered, signer.address());
 ```
@@ -58,9 +58,9 @@ assert_eq!(recovered, signer.address());
 ## Bitcoin (secp256k1 ECDSA + BIP-340 Schnorr)
 
 ```rust
-use trad_signer::bitcoin::BitcoinSigner;
-use trad_signer::bitcoin::schnorr::SchnorrSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::bitcoin::BitcoinSigner;
+use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+use chains_sdk::traits::{KeyPair, Signer};
 
 // ECDSA signer — Legacy + SegWit addresses
 let signer = BitcoinSigner::generate()?;
@@ -86,8 +86,8 @@ let sig = schnorr.sign(b"taproot message")?;
 ## Solana (Ed25519)
 
 ```rust
-use trad_signer::solana::SolanaSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::solana::SolanaSigner;
+use chains_sdk::traits::{KeyPair, Signer};
 
 let signer = SolanaSigner::generate()?;
 println!("Address: {}", signer.address()); // Base58
@@ -99,8 +99,8 @@ let sig = signer.sign(b"solana message")?;
 ## XRP (secp256k1 ECDSA + Ed25519)
 
 ```rust
-use trad_signer::xrp::{XrpEcdsaSigner, XrpEddsaSigner};
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::xrp::{XrpEcdsaSigner, XrpEddsaSigner};
+use chains_sdk::traits::{KeyPair, Signer};
 
 // ECDSA variant
 let ecdsa = XrpEcdsaSigner::generate()?;
@@ -117,8 +117,8 @@ println!("XRP address: {}", eddsa.address()?);
 ## NEO (P-256 ECDSA)
 
 ```rust
-use trad_signer::neo::NeoSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::neo::NeoSigner;
+use chains_sdk::traits::{KeyPair, Signer};
 
 let signer = NeoSigner::generate()?;
 println!("NEO address: {}", signer.address()); // A...
@@ -130,8 +130,8 @@ let sig = signer.sign(b"neo data")?;
 ## BLS (BLS12-381 Aggregated Signatures)
 
 ```rust
-use trad_signer::bls::{BlsSigner, BlsVerifier};
-use trad_signer::traits::{KeyPair, Signer, Verifier};
+use chains_sdk::bls::{BlsSigner, BlsVerifier};
+use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
 let signer1 = BlsSigner::generate()?;
 let signer2 = BlsSigner::generate()?;
@@ -151,8 +151,8 @@ assert!(BlsVerifier::verify_aggregated(b"consensus", &verifiers, &[sig1, sig2])?
 ## BIP-39 Mnemonic → HD Keys (BIP-32/44)
 
 ```rust
-use trad_signer::mnemonic::Mnemonic;
-use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
+use chains_sdk::mnemonic::Mnemonic;
+use chains_sdk::hd_key::{ExtendedPrivateKey, DerivationPath};
 
 // Generate 24-word mnemonic
 let mnemonic = Mnemonic::generate(24)?;
@@ -183,8 +183,8 @@ let btc = Mnemonic::to_bitcoin_signer("abandon abandon ... about", "")?;
 Derive unlimited child mnemonics, WIF keys, and xprv keys from a single master.
 
 ```rust
-use trad_signer::hd_key::ExtendedPrivateKey;
-use trad_signer::bip85;
+use chains_sdk::hd_key::ExtendedPrivateKey;
+use chains_sdk::bip85;
 
 let seed = [0xab_u8; 64];
 let master = ExtendedPrivateKey::from_seed(&seed)?;
@@ -211,7 +211,7 @@ let entropy = bip85::derive_hex(&master, 32, 0)?;
 Any `t` of `n` participants can collaboratively sign. No single party holds the full key.
 
 ```rust
-use trad_signer::threshold::frost::{keygen, signing};
+use chains_sdk::threshold::frost::{keygen, signing};
 
 // 1. Trusted dealer generates 2-of-3 key shares
 let secret = [0x42u8; 32]; // group secret key
@@ -258,7 +258,7 @@ assert!(is_valid);
 All signers must participate. Produces a standard BIP-340 Schnorr signature.
 
 ```rust
-use trad_signer::threshold::musig2;
+use chains_sdk::threshold::musig2;
 
 // 1. Each signer has their own key pair
 let sk1 = [0x01u8; 32];
@@ -295,9 +295,9 @@ assert!(musig2::verify(&sig, &key_agg.x_only_pubkey, msg)?);
 ## Address Validation
 
 ```rust
-use trad_signer::bitcoin::validate_address;
-use trad_signer::ethereum::validate_address as validate_eth;
-use trad_signer::solana::validate_address as validate_sol;
+use chains_sdk::bitcoin::validate_address;
+use chains_sdk::ethereum::validate_address as validate_eth;
+use chains_sdk::solana::validate_address as validate_sol;
 
 assert!(validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"));      // BTC P2PKH
 assert!(validate_address("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")); // BTC P2WPKH
@@ -310,9 +310,9 @@ assert!(validate_sol("11111111111111111111111111111112"));               // Sola
 ## BIP-322 Message Signing & Verification
 
 ```rust
-use trad_signer::bitcoin::{BitcoinSigner, message};
-use trad_signer::bitcoin::schnorr::SchnorrSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use chains_sdk::bitcoin::{BitcoinSigner, message};
+use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+use chains_sdk::traits::{KeyPair, Signer};
 
 // ── P2WPKH (SegWit) ──
 let signer = BitcoinSigner::generate()?;
@@ -334,10 +334,10 @@ let proof = message::sign_simple_p2tr(&schnorr_signer, b"Hello World")?;
 ## PSBT (Partially Signed Bitcoin Transactions)
 
 ```rust
-use trad_signer::bitcoin::BitcoinSigner;
-use trad_signer::bitcoin::psbt::v0::Psbt;
-use trad_signer::bitcoin::tapscript::SighashType;
-use trad_signer::traits::KeyPair;
+use chains_sdk::bitcoin::BitcoinSigner;
+use chains_sdk::bitcoin::psbt::v0::Psbt;
+use chains_sdk::bitcoin::tapscript::SighashType;
+use chains_sdk::traits::KeyPair;
 
 // Deserialize a PSBT
 let mut psbt = Psbt::deserialize(&psbt_bytes)?;
@@ -359,7 +359,7 @@ let restored = Psbt::deserialize(&reserialized)?;
 ## Output Descriptors (BIP-380-386)
 
 ```rust
-use trad_signer::bitcoin::descriptor;
+use chains_sdk::bitcoin::descriptor;
 
 // Parse and derive addresses from output descriptors
 let desc = descriptor::parse("wpkh(02...pubkey...)");
@@ -374,7 +374,7 @@ All modules are enabled by default. Disable unused ones to reduce compile time:
 
 ```toml
 [dependencies]
-trad-signer = { version = "0.7", default-features = false, features = ["ethereum", "frost"] }
+chains-sdk = { version = "0.7", default-features = false, features = ["ethereum", "frost"] }
 ```
 
 | Feature | Description |
@@ -419,10 +419,10 @@ Run with `cargo bench --all-features`. Covers all chains + threshold signing:
 
 ### Enclave / Confidential Computing
 
-trad-signer is hardened for SGX, Nitro, TDX, and SEV-SNP environments:
+chains-sdk is hardened for SGX, Nitro, TDX, and SEV-SNP environments:
 
 ```rust
-use trad_signer::security::{GuardedMemory, secure_random, ct_hex_encode};
+use chains_sdk::security::{GuardedMemory, secure_random, ct_hex_encode};
 
 // Zeroize-on-drop memory for sensitive data
 let mut guard = GuardedMemory::new(32);
@@ -439,7 +439,7 @@ println!("{:?}", guard);
 
 ```rust
 // Replace getrandom with hardware TRNG
-trad_signer::security::set_custom_rng(Box::new(|buf| {
+chains_sdk::security::set_custom_rng(Box::new(|buf| {
     my_enclave_trng_fill(buf);  // e.g., RDRAND, /dev/nsm
     Ok(())
 }));
@@ -471,7 +471,7 @@ src/
 ├── encoding.rs        # Shared: compact_size, bech32, base58check
 ├── error.rs           # Unified SignerError enum
 ├── traits.rs          # KeyPair, Signer, Verifier traits
-├── bin/               # CLI tool (trad-signer keygen/sign/verify/address)
+├── bin/               # CLI tool (chains-sdk keygen/sign/verify/address)
 ├── bitcoin/
 │   ├── mod.rs         # ECDSA signer, WIF, P2PKH/P2WPKH, BIP-137
 │   ├── schnorr.rs     # BIP-340 Schnorr, P2TR addresses

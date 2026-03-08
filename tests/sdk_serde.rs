@@ -3,8 +3,8 @@
 
 #[cfg(feature = "ethereum")]
 mod eth_serde {
-    use trad_signer::ethereum::{EthereumSignature, EthereumSigner, EthereumVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::ethereum::{EthereumSignature, EthereumSigner, EthereumVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_uncompressed_pubkey_65_bytes() {
@@ -54,9 +54,9 @@ mod eth_serde {
 
 #[cfg(feature = "bitcoin")]
 mod btc_serde {
-    use trad_signer::bitcoin::schnorr::{SchnorrSignature, SchnorrSigner};
-    use trad_signer::bitcoin::{BitcoinSignature, BitcoinSigner, BitcoinVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bitcoin::schnorr::{SchnorrSignature, SchnorrSigner};
+    use chains_sdk::bitcoin::{BitcoinSignature, BitcoinSigner, BitcoinVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_uncompressed_pubkey_65_bytes() {
@@ -107,8 +107,8 @@ mod btc_serde {
 
 #[cfg(feature = "neo")]
 mod neo_serde {
-    use trad_signer::neo::{NeoSignature, NeoSigner, NeoVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::neo::{NeoSignature, NeoSigner, NeoVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_uncompressed_pubkey_65_bytes() {
@@ -139,8 +139,8 @@ mod neo_serde {
 
 #[cfg(feature = "solana")]
 mod solana_serde {
-    use trad_signer::solana::{SolanaSignature, SolanaSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::solana::{SolanaSignature, SolanaSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_keypair_64_roundtrip() {
@@ -209,8 +209,8 @@ mod solana_serde {
 
 #[cfg(feature = "xrp")]
 mod xrp_serde {
-    use trad_signer::traits::{KeyPair, Signer};
-    use trad_signer::xrp::{XrpEcdsaSigner, XrpEddsaSigner, XrpSignature};
+    use chains_sdk::traits::{KeyPair, Signer};
+    use chains_sdk::xrp::{XrpEcdsaSigner, XrpEddsaSigner, XrpSignature};
 
     #[test]
     fn test_ecdsa_uncompressed_65() {
@@ -246,8 +246,8 @@ mod xrp_serde {
 
 #[cfg(feature = "bls")]
 mod bls_serde {
-    use trad_signer::bls::{BlsPublicKey, BlsSignature, BlsSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bls::{BlsPublicKey, BlsSignature, BlsSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_sig_96_roundtrip() {
@@ -291,8 +291,8 @@ mod bls_serde {
 
 #[cfg(all(feature = "serde", feature = "ethereum"))]
 mod json_eth {
-    use trad_signer::ethereum::{EthereumSignature, EthereumSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::ethereum::{EthereumSignature, EthereumSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_ethereum_sig_json_roundtrip() {
@@ -308,9 +308,9 @@ mod json_eth {
 
 #[cfg(all(feature = "serde", feature = "bitcoin"))]
 mod json_btc {
-    use trad_signer::bitcoin::schnorr::{SchnorrSignature, SchnorrSigner};
-    use trad_signer::bitcoin::{BitcoinSignature, BitcoinSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bitcoin::schnorr::{SchnorrSignature, SchnorrSigner};
+    use chains_sdk::bitcoin::{BitcoinSignature, BitcoinSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_bitcoin_sig_json_roundtrip() {
@@ -334,8 +334,8 @@ mod json_btc {
 
 #[cfg(all(feature = "serde", feature = "solana"))]
 mod json_sol {
-    use trad_signer::solana::{SolanaSignature, SolanaSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::solana::{SolanaSignature, SolanaSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_solana_sig_json_roundtrip() {
@@ -349,8 +349,8 @@ mod json_sol {
 
 #[cfg(all(feature = "serde", feature = "neo"))]
 mod json_neo {
-    use trad_signer::neo::{NeoSignature, NeoSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::neo::{NeoSignature, NeoSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_neo_sig_json_roundtrip() {
@@ -364,8 +364,8 @@ mod json_neo {
 
 #[cfg(all(feature = "serde", feature = "xrp"))]
 mod json_xrp {
-    use trad_signer::traits::{KeyPair, Signer};
-    use trad_signer::xrp::{XrpEcdsaSigner, XrpSignature};
+    use chains_sdk::traits::{KeyPair, Signer};
+    use chains_sdk::xrp::{XrpEcdsaSigner, XrpSignature};
 
     #[test]
     fn test_xrp_sig_json_roundtrip() {
@@ -379,8 +379,8 @@ mod json_xrp {
 
 #[cfg(all(feature = "serde", feature = "bls"))]
 mod json_bls {
-    use trad_signer::bls::{BlsPublicKey, BlsSignature, BlsSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bls::{BlsPublicKey, BlsSignature, BlsSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_bls_sig_json_roundtrip() {

@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use trad_signer::bls::{BlsSigner, BlsVerifier, BlsSignature, aggregate_signatures};
-use trad_signer::traits::{KeyPair, Signer, Verifier};
+use chains_sdk::bls::{BlsSigner, BlsVerifier, BlsSignature, aggregate_signatures};
+use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
 fuzz_target!(|data: &[u8]| {
     // Fuzz signing

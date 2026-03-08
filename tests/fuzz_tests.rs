@@ -28,13 +28,13 @@ mod ethereum_fuzz {
     #[test]
     fn fuzz_eth_signature_from_bytes() {
         fuzz_no_panic("ETH sig from_bytes", 1000, 128, |data| {
-            let _ = trad_signer::ethereum::EthereumSignature::from_bytes(data);
+            let _ = chains_sdk::ethereum::EthereumSignature::from_bytes(data);
         });
     }
 
     #[test]
     fn fuzz_eth_keystore_decrypt_no_panic() {
-        use trad_signer::ethereum::keystore::{Keystore, ScryptParams};
+        use chains_sdk::ethereum::keystore::{Keystore, ScryptParams};
 
         let pk = [0x42u8; 32];
         let ks = Keystore::encrypt(&pk, b"correct", &ScryptParams::light()).unwrap();
@@ -48,14 +48,14 @@ mod ethereum_fuzz {
     fn fuzz_eth_validate_address() {
         fuzz_no_panic("ETH validate_address", 1000, 64, |data| {
             let s = String::from_utf8_lossy(data);
-            let _ = trad_signer::ethereum::validate_address(&s);
+            let _ = chains_sdk::ethereum::validate_address(&s);
         });
     }
 
     #[test]
     fn fuzz_eth_from_bytes() {
-        use trad_signer::ethereum::EthereumSigner;
-        use trad_signer::traits::KeyPair;
+        use chains_sdk::ethereum::EthereumSigner;
+        use chains_sdk::traits::KeyPair;
 
         fuzz_no_panic("ETH from_bytes", 500, 64, |data| {
             let _ = EthereumSigner::from_bytes(data);
@@ -70,7 +70,7 @@ mod bitcoin_fuzz {
     #[test]
     fn fuzz_psbt_deserialize_no_panic() {
         fuzz_no_panic("PSBT deserialize", 500, 1024, |data| {
-            let _ = trad_signer::bitcoin::psbt::v0::Psbt::deserialize(data);
+            let _ = chains_sdk::bitcoin::psbt::v0::Psbt::deserialize(data);
         });
     }
 
@@ -78,14 +78,14 @@ mod bitcoin_fuzz {
     fn fuzz_wif_import_no_panic() {
         fuzz_no_panic("WIF import", 500, 64, |data| {
             let s = String::from_utf8_lossy(data);
-            let _ = trad_signer::bitcoin::BitcoinSigner::from_wif(&s);
+            let _ = chains_sdk::bitcoin::BitcoinSigner::from_wif(&s);
         });
     }
 
     #[test]
     fn fuzz_btc_from_bytes() {
-        use trad_signer::bitcoin::BitcoinSigner;
-        use trad_signer::traits::KeyPair;
+        use chains_sdk::bitcoin::BitcoinSigner;
+        use chains_sdk::traits::KeyPair;
 
         fuzz_no_panic("BTC from_bytes", 500, 64, |data| {
             let _ = BitcoinSigner::from_bytes(data);
@@ -94,8 +94,8 @@ mod bitcoin_fuzz {
 
     #[test]
     fn fuzz_schnorr_from_bytes() {
-        use trad_signer::bitcoin::schnorr::SchnorrSigner;
-        use trad_signer::traits::KeyPair;
+        use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+        use chains_sdk::traits::KeyPair;
 
         fuzz_no_panic("Schnorr from_bytes", 500, 64, |data| {
             let _ = SchnorrSigner::from_bytes(data);
@@ -106,7 +106,7 @@ mod bitcoin_fuzz {
     fn fuzz_btc_validate_address() {
         fuzz_no_panic("BTC validate_address", 1000, 128, |data| {
             let s = String::from_utf8_lossy(data);
-            let _ = trad_signer::bitcoin::validate_address(&s);
+            let _ = chains_sdk::bitcoin::validate_address(&s);
         });
     }
 }
@@ -117,9 +117,9 @@ mod bls_fuzz {
 
     #[test]
     fn fuzz_bls_keystore_decrypt_no_panic() {
-        use trad_signer::bls::keystore::{BlsKeystore, BlsScryptParams};
-        use trad_signer::bls::BlsSigner;
-        use trad_signer::traits::{KeyPair, Signer};
+        use chains_sdk::bls::keystore::{BlsKeystore, BlsScryptParams};
+        use chains_sdk::bls::BlsSigner;
+        use chains_sdk::traits::{KeyPair, Signer};
 
         let signer = BlsSigner::generate().unwrap();
         let pk_bytes = Signer::public_key_bytes(&signer);
@@ -147,14 +147,14 @@ mod hd_key_fuzz {
     fn fuzz_xprv_deserialize_no_panic() {
         fuzz_no_panic("xprv deserialize", 500, 128, |data| {
             let s = String::from_utf8_lossy(data);
-            let _ = trad_signer::hd_key::ExtendedPrivateKey::from_xprv(&s);
+            let _ = chains_sdk::hd_key::ExtendedPrivateKey::from_xprv(&s);
         });
     }
 
     #[test]
     fn fuzz_from_seed_no_panic() {
         fuzz_no_panic("from_seed", 500, 128, |data| {
-            let _ = trad_signer::hd_key::ExtendedPrivateKey::from_seed(data);
+            let _ = chains_sdk::hd_key::ExtendedPrivateKey::from_seed(data);
         });
     }
 }
@@ -165,8 +165,8 @@ mod neo_fuzz {
 
     #[test]
     fn fuzz_neo_from_bytes() {
-        use trad_signer::neo::NeoSigner;
-        use trad_signer::traits::KeyPair;
+        use chains_sdk::neo::NeoSigner;
+        use chains_sdk::traits::KeyPair;
 
         fuzz_no_panic("NEO from_bytes", 500, 64, |data| {
             let _ = NeoSigner::from_bytes(data);
@@ -182,15 +182,15 @@ mod security_fuzz {
     fn fuzz_ct_hex_decode() {
         fuzz_no_panic("ct_hex_decode", 1000, 128, |data| {
             let s = String::from_utf8_lossy(data);
-            let _ = trad_signer::security::ct_hex_decode(&s);
+            let _ = chains_sdk::security::ct_hex_decode(&s);
         });
     }
 
     #[test]
     fn fuzz_ct_hex_roundtrip() {
         fuzz_no_panic("ct_hex_roundtrip", 500, 64, |data| {
-            let encoded = trad_signer::security::ct_hex_encode(data);
-            let decoded = trad_signer::security::ct_hex_decode(&encoded);
+            let encoded = chains_sdk::security::ct_hex_encode(data);
+            let decoded = chains_sdk::security::ct_hex_decode(&encoded);
             assert_eq!(decoded.as_deref(), Some(data));
         });
     }

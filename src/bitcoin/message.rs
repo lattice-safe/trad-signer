@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::bitcoin::message;
+//! use chains_sdk::bitcoin::message;
 //!
 //! let hash = message::message_hash(b"Hello World");
 //! assert_eq!(hex::encode(hash), "f0eb03b1a75ac6d9847f55c624a99169b5dccba2a31f5b23bea77ba270de0a7a");

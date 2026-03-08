@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
+//! use chains_sdk::hd_key::{ExtendedPrivateKey, DerivationPath};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let seed = [0xab_u8; 64];

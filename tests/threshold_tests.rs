@@ -8,7 +8,7 @@
 
 #[cfg(feature = "frost")]
 mod frost_tests {
-    use trad_signer::threshold::frost::{keygen, signing};
+    use chains_sdk::threshold::frost::{keygen, signing};
 
     #[test]
     fn test_frost_2_of_3_full_roundtrip() {
@@ -361,7 +361,7 @@ mod frost_tests {
 
 #[cfg(feature = "musig2")]
 mod musig2_tests {
-    use trad_signer::threshold::musig2;
+    use chains_sdk::threshold::musig2;
 
     #[test]
     fn test_musig2_2_of_2_full_roundtrip() {

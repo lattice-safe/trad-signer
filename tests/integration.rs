@@ -1,4 +1,4 @@
-//! Cross-module integration tests for trad-signer.
+//! Cross-module integration tests for chains-sdk.
 //!
 //! Verifies that modules are correctly isolated, trait implementations
 //! are consistent, and the same private key material produces different
@@ -6,9 +6,9 @@
 
 #[cfg(all(feature = "ethereum", feature = "bitcoin"))]
 mod cross_chain {
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::ethereum::EthereumSigner;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::ethereum::EthereumSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     /// Same private key bytes must produce different signatures on ETH vs BTC
     /// because they use different hash functions (Keccak-256 vs Double SHA-256).
@@ -51,9 +51,9 @@ mod cross_chain {
 
 #[cfg(all(feature = "solana", feature = "xrp"))]
 mod ed25519_cross {
-    use trad_signer::solana::SolanaSigner;
-    use trad_signer::traits::{KeyPair, Signer};
-    use trad_signer::xrp::XrpEddsaSigner;
+    use chains_sdk::solana::SolanaSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
+    use chains_sdk::xrp::XrpEddsaSigner;
 
     /// Same Ed25519 seed produces the same public key on Solana and XRP.
     #[test]
@@ -77,9 +77,9 @@ mod ed25519_cross {
 
 #[cfg(feature = "ethereum")]
 mod eip712_integration {
+    use chains_sdk::ethereum::{eip712_hash, Eip712Domain, EthereumSigner, EthereumVerifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
     use sha3::{Digest, Keccak256};
-    use trad_signer::ethereum::{eip712_hash, Eip712Domain, EthereumSigner, EthereumVerifier};
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
 
     /// Full EIP-712 Permit flow: domain + struct type hash + encoding.
     #[test]
@@ -133,8 +133,8 @@ mod eip712_integration {
 
 #[cfg(feature = "bls")]
 mod bls_integration {
-    use trad_signer::bls::{aggregate_signatures, verify_aggregated, BlsSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bls::{aggregate_signatures, verify_aggregated, BlsSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     /// Aggregate 100 signatures and verify
     #[test]
@@ -151,10 +151,10 @@ mod bls_integration {
 
 #[cfg(all(feature = "ethereum", feature = "bitcoin", feature = "neo"))]
 mod trait_consistency {
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::ethereum::EthereumSigner;
-    use trad_signer::neo::NeoSigner;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::ethereum::EthereumSigner;
+    use chains_sdk::neo::NeoSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     /// All ECDSA signers should produce 32-byte private keys.
     #[test]
@@ -190,11 +190,11 @@ mod trait_consistency {
     feature = "solana"
 ))]
 mod mnemonic_multichaain {
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::ethereum::EthereumSigner;
-    use trad_signer::hd_key::{DerivationPath, ExtendedPrivateKey};
-    use trad_signer::mnemonic::Mnemonic;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::ethereum::EthereumSigner;
+    use chains_sdk::hd_key::{DerivationPath, ExtendedPrivateKey};
+    use chains_sdk::mnemonic::Mnemonic;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     /// Full workflow: generate mnemonic → derive HD keys → sign on ETH, BTC, SOL
     #[test]
@@ -208,7 +208,7 @@ mod mnemonic_multichaain {
         let eth_key = master.derive_path(&DerivationPath::ethereum(0)).unwrap();
         let eth_signer = EthereumSigner::from_bytes(&eth_key.private_key_bytes()).unwrap();
         let eth_sig = eth_signer.sign(b"cross-chain test").unwrap();
-        let eth_verifier = trad_signer::ethereum::EthereumVerifier::from_public_key_bytes(
+        let eth_verifier = chains_sdk::ethereum::EthereumVerifier::from_public_key_bytes(
             &eth_signer.public_key_bytes(),
         )
         .unwrap();
@@ -234,11 +234,11 @@ mod mnemonic_multichaain {
 
 #[cfg(all(feature = "bip85", feature = "mnemonic", feature = "bitcoin"))]
 mod bip85_workflow {
-    use trad_signer::bip85;
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::hd_key::ExtendedPrivateKey;
-    use trad_signer::mnemonic::Mnemonic;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bip85;
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::hd_key::ExtendedPrivateKey;
+    use chains_sdk::mnemonic::Mnemonic;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     /// BIP-85: master → child mnemonic → derive BTC → sign
     #[test]
@@ -256,7 +256,7 @@ mod bip85_workflow {
 
         // Derive BTC key from the child HD tree
         let btc_key = child_master
-            .derive_path(&trad_signer::hd_key::DerivationPath::bitcoin_segwit(0))
+            .derive_path(&chains_sdk::hd_key::DerivationPath::bitcoin_segwit(0))
             .unwrap();
         let btc_signer = BitcoinSigner::from_bytes(&btc_key.private_key_bytes()).unwrap();
         let sig = btc_signer.sign(b"BIP-85 derived signing").unwrap();
@@ -289,8 +289,8 @@ mod bip85_workflow {
 
 #[cfg(all(feature = "frost", feature = "musig2"))]
 mod threshold_e2e {
-    use trad_signer::threshold::frost::{keygen, signing};
-    use trad_signer::threshold::musig2::signing as musig2;
+    use chains_sdk::threshold::frost::{keygen, signing};
+    use chains_sdk::threshold::musig2::signing as musig2;
 
     /// Full FROST keygen → sign → verify → different-subset
     #[test]
@@ -348,18 +348,18 @@ mod threshold_e2e {
 mod psbt_e2e {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use trad_signer::bitcoin::psbt::v0::Psbt;
-    use trad_signer::bitcoin::tapscript::SighashType;
-    use trad_signer::bitcoin::transaction::*;
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bitcoin::psbt::v0::Psbt;
+    use chains_sdk::bitcoin::tapscript::SighashType;
+    use chains_sdk::bitcoin::transaction::*;
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_psbt_segwit_sign_e2e() {
         // 1. Generate a signer
         let signer = BitcoinSigner::generate().unwrap();
         let pubkey = signer.public_key_bytes();
-        let pubkey_hash = trad_signer::crypto::hash160(&pubkey);
+        let pubkey_hash = chains_sdk::crypto::hash160(&pubkey);
 
         // 2. Build a raw unsigned transaction
         let mut tx = Transaction::new(2);
@@ -414,7 +414,7 @@ mod psbt_e2e {
     fn test_psbt_roundtrip_serialization_with_sig() {
         let signer = BitcoinSigner::generate().unwrap();
         let pubkey = signer.public_key_bytes();
-        let pubkey_hash = trad_signer::crypto::hash160(&pubkey);
+        let pubkey_hash = chains_sdk::crypto::hash160(&pubkey);
 
         let mut tx = Transaction::new(2);
         tx.inputs.push(TxIn {
@@ -466,7 +466,7 @@ mod psbt_e2e {
 mod bip322_vectors {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use trad_signer::bitcoin::message;
+    use chains_sdk::bitcoin::message;
 
     /// BIP-322 test vector: empty message hash
     /// From: https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki
@@ -494,11 +494,11 @@ mod bip322_vectors {
     /// BIP-322 sign→verify roundtrip with P2WPKH
     #[test]
     fn test_bip322_sign_verify_roundtrip_p2wpkh() {
-        use trad_signer::bitcoin::sighash;
-        use trad_signer::bitcoin::tapscript::SighashType;
-        use trad_signer::bitcoin::transaction::*;
-        use trad_signer::bitcoin::BitcoinSigner;
-        use trad_signer::traits::{KeyPair, Signer};
+        use chains_sdk::bitcoin::sighash;
+        use chains_sdk::bitcoin::tapscript::SighashType;
+        use chains_sdk::bitcoin::transaction::*;
+        use chains_sdk::bitcoin::BitcoinSigner;
+        use chains_sdk::traits::{KeyPair, Signer};
 
         let signer = BitcoinSigner::generate().unwrap();
         let pubkey = signer.public_key_bytes();
@@ -511,7 +511,7 @@ mod bip322_vectors {
         assert!(!proof.is_empty(), "proof should not be empty");
 
         // Manually compute signature for verification
-        let pubkey_hash = trad_signer::crypto::hash160(&pubkey33);
+        let pubkey_hash = chains_sdk::crypto::hash160(&pubkey33);
         let script_pk = message::p2wpkh_script_pubkey(&pubkey_hash);
         let to_spend = message::create_to_spend_tx(&script_pk, msg);
         let to_spend_txid = message::compute_txid(&to_spend);
@@ -554,11 +554,11 @@ mod bip322_vectors {
     /// BIP-322 sign→verify roundtrip with P2TR (Schnorr)
     #[test]
     fn test_bip322_sign_verify_roundtrip_p2tr() {
-        use trad_signer::bitcoin::schnorr::SchnorrSigner;
-        use trad_signer::bitcoin::sighash;
-        use trad_signer::bitcoin::tapscript::SighashType;
-        use trad_signer::bitcoin::transaction::*;
-        use trad_signer::traits::{KeyPair, Signer};
+        use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+        use chains_sdk::bitcoin::sighash;
+        use chains_sdk::bitcoin::tapscript::SighashType;
+        use chains_sdk::bitcoin::transaction::*;
+        use chains_sdk::traits::{KeyPair, Signer};
 
         let signer = SchnorrSigner::generate().unwrap();
         let pubkey = signer.public_key_bytes();
@@ -611,7 +611,7 @@ mod bip322_vectors {
 
 #[cfg(feature = "bls")]
 mod bls_threshold_e2e {
-    use trad_signer::bls::threshold;
+    use chains_sdk::bls::threshold;
 
     #[test]
     fn test_bls_threshold_keygen_sign_aggregate() {
@@ -646,13 +646,13 @@ mod bls_threshold_e2e {
 
 #[cfg(all(feature = "ethereum", feature = "solana"))]
 mod edge_cases {
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_sign_empty_message_eth() {
-        let signer = trad_signer::ethereum::EthereumSigner::generate().unwrap();
+        let signer = chains_sdk::ethereum::EthereumSigner::generate().unwrap();
         let sig = signer.sign(b"").unwrap();
-        let verifier = trad_signer::ethereum::EthereumVerifier::from_public_key_bytes(
+        let verifier = chains_sdk::ethereum::EthereumVerifier::from_public_key_bytes(
             &signer.public_key_bytes(),
         )
         .unwrap();
@@ -661,24 +661,24 @@ mod edge_cases {
 
     #[test]
     fn test_sign_large_message_sol() {
-        let signer = trad_signer::solana::SolanaSigner::generate().unwrap();
+        let signer = chains_sdk::solana::SolanaSigner::generate().unwrap();
         let large_msg = vec![0xAA; 10_000];
         let sig = signer.sign(&large_msg).unwrap();
         let verifier =
-            trad_signer::solana::SolanaVerifier::from_public_key_bytes(&signer.public_key_bytes())
+            chains_sdk::solana::SolanaVerifier::from_public_key_bytes(&signer.public_key_bytes())
                 .unwrap();
         assert!(verifier.verify(&large_msg, &sig).unwrap());
     }
 
     #[test]
     fn test_wrong_key_verify_fails_sol() {
-        let signer1 = trad_signer::solana::SolanaSigner::generate().unwrap();
-        let signer2 = trad_signer::solana::SolanaSigner::generate().unwrap();
+        let signer1 = chains_sdk::solana::SolanaSigner::generate().unwrap();
+        let signer2 = chains_sdk::solana::SolanaSigner::generate().unwrap();
         let msg = b"wrong key test";
         let sig = signer1.sign(msg).unwrap();
 
         let verifier2 =
-            trad_signer::solana::SolanaVerifier::from_public_key_bytes(&signer2.public_key_bytes())
+            chains_sdk::solana::SolanaVerifier::from_public_key_bytes(&signer2.public_key_bytes())
                 .unwrap();
         assert!(!verifier2.verify(msg, &sig).unwrap());
     }
@@ -688,8 +688,8 @@ mod edge_cases {
 
 #[cfg(feature = "bls")]
 mod eip2333_integration {
-    use trad_signer::bls::eip2333;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bls::eip2333;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_eip2333_validator_signing_roundtrip() {
@@ -698,10 +698,9 @@ mod eip2333_integration {
         let msg = b"beacon chain attestation";
         let sig = signer.sign(msg).unwrap();
 
-        let verifier = trad_signer::bls::BlsVerifier::from_public_key_bytes(
-            &Signer::public_key_bytes(&signer),
-        )
-        .unwrap();
+        let verifier =
+            chains_sdk::bls::BlsVerifier::from_public_key_bytes(&Signer::public_key_bytes(&signer))
+                .unwrap();
         assert!(verifier.verify(msg, &sig).unwrap());
     }
 
@@ -726,7 +725,7 @@ mod eip2333_integration {
 
     #[test]
     fn test_eip2333_mnemonic_to_validator() {
-        use trad_signer::mnemonic::Mnemonic;
+        use chains_sdk::mnemonic::Mnemonic;
 
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let mnemonic = Mnemonic::from_phrase(phrase).unwrap();
@@ -743,7 +742,7 @@ mod eip2333_integration {
 
 #[cfg(feature = "frost")]
 mod frost_large {
-    use trad_signer::threshold::frost::{keygen, signing};
+    use chains_sdk::threshold::frost::{keygen, signing};
 
     #[test]
     fn test_frost_5_of_9_full() {

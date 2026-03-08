@@ -201,7 +201,7 @@ impl EthereumSigner {
     ///
     /// # Example
     /// ```no_run
-    /// use trad_signer::ethereum::EthereumSigner;
+    /// use chains_sdk::ethereum::EthereumSigner;
     ///
     /// let signer = EthereumSigner::from_mnemonic(
     ///     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
@@ -374,7 +374,7 @@ pub fn eip191_hash(message: &[u8]) -> [u8; 32] {
 /// Use [`Eip712Domain::separator`] to compute the 32-byte domain separator hash.
 ///
 /// ```no_run
-/// use trad_signer::ethereum::Eip712Domain;
+/// use chains_sdk::ethereum::Eip712Domain;
 ///
 /// let contract_addr = [0xCC_u8; 20];
 /// let domain = Eip712Domain {
@@ -888,7 +888,7 @@ mod tests {
     fn test_eip191_sign_verify_roundtrip() {
         let signer = EthereumSigner::generate().unwrap();
         let verifier = EthereumVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
-        let msg = b"Hello from trad-signer!";
+        let msg = b"Hello from chains-sdk!";
         let sig = signer.personal_sign(msg).unwrap();
         assert!(sig.v == 27 || sig.v == 28);
         assert!(verifier.verify_personal_sign(msg, &sig).unwrap());

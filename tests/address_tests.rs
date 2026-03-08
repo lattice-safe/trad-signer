@@ -2,8 +2,8 @@
 
 #[cfg(feature = "ethereum")]
 mod ethereum {
-    use trad_signer::ethereum::{ecrecover, eip55_checksum, EthereumSigner};
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::ethereum::{ecrecover, eip55_checksum, EthereumSigner};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_eip55_checksum_known_vector() {
@@ -45,7 +45,7 @@ mod ethereum {
 
     #[test]
     fn test_ecrecover_personal_sign() {
-        use trad_signer::ethereum::{ecrecover_digest, eip191_hash};
+        use chains_sdk::ethereum::{ecrecover_digest, eip191_hash};
         let signer = EthereumSigner::generate().unwrap();
         let msg = b"personal sign recovery test";
         let sig = signer.personal_sign(msg).unwrap();
@@ -65,9 +65,9 @@ mod ethereum {
 
 #[cfg(feature = "bitcoin")]
 mod bitcoin {
-    use trad_signer::bitcoin::schnorr::SchnorrSigner;
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_p2pkh_address_starts_with_1() {
@@ -137,8 +137,8 @@ mod bitcoin {
 
 #[cfg(feature = "solana")]
 mod solana {
-    use trad_signer::solana::SolanaSigner;
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::solana::SolanaSigner;
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_solana_address_is_base58() {
@@ -157,7 +157,7 @@ mod solana {
 
     #[test]
     fn test_solana_address_matches_pubkey() {
-        use trad_signer::traits::Signer;
+        use chains_sdk::traits::Signer;
         let signer = SolanaSigner::generate().unwrap();
         let addr = signer.address();
         let pubkey = signer.public_key_bytes();
@@ -168,8 +168,8 @@ mod solana {
 
 #[cfg(feature = "xrp")]
 mod xrp {
-    use trad_signer::traits::KeyPair;
-    use trad_signer::xrp::{XrpEcdsaSigner, XrpEddsaSigner};
+    use chains_sdk::traits::KeyPair;
+    use chains_sdk::xrp::{XrpEcdsaSigner, XrpEddsaSigner};
 
     #[test]
     fn test_xrp_ecdsa_address_starts_with_r() {
@@ -211,8 +211,8 @@ mod xrp {
 
 #[cfg(feature = "neo")]
 mod neo {
-    use trad_signer::neo::NeoSigner;
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::neo::NeoSigner;
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_neo_address_starts_with_a() {
@@ -257,14 +257,14 @@ mod neo {
     #[test]
     fn test_neo_validate_generated_address() {
         let signer = NeoSigner::generate().unwrap();
-        assert!(trad_signer::neo::validate_address(&signer.address()));
+        assert!(chains_sdk::neo::validate_address(&signer.address()));
     }
 
     #[test]
     fn test_neo_validate_rejects_invalid() {
-        assert!(!trad_signer::neo::validate_address(""));
-        assert!(!trad_signer::neo::validate_address("not_a_neo_address"));
-        assert!(!trad_signer::neo::validate_address("A"));
+        assert!(!chains_sdk::neo::validate_address(""));
+        assert!(!chains_sdk::neo::validate_address("not_a_neo_address"));
+        assert!(!chains_sdk::neo::validate_address("A"));
     }
 }
 
@@ -272,8 +272,8 @@ mod neo {
 
 #[cfg(feature = "ethereum")]
 mod eth_validation {
-    use trad_signer::ethereum::{validate_address, EthereumSigner};
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::ethereum::{validate_address, EthereumSigner};
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_validate_eip55_checksummed() {
@@ -328,8 +328,8 @@ mod eth_validation {
 
 #[cfg(feature = "solana")]
 mod sol_validation {
-    use trad_signer::solana::{validate_address, SolanaSigner};
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::solana::{validate_address, SolanaSigner};
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_validate_generated_address() {
@@ -350,8 +350,8 @@ mod sol_validation {
 
 #[cfg(feature = "xrp")]
 mod xrp_validation {
-    use trad_signer::traits::KeyPair;
-    use trad_signer::xrp::{validate_address, XrpEcdsaSigner, XrpEddsaSigner};
+    use chains_sdk::traits::KeyPair;
+    use chains_sdk::xrp::{validate_address, XrpEcdsaSigner, XrpEddsaSigner};
 
     #[test]
     fn test_validate_ecdsa_address() {

@@ -1,6 +1,6 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use trad_signer::hd_key::ExtendedPrivateKey;
+use chains_sdk::hd_key::ExtendedPrivateKey;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {

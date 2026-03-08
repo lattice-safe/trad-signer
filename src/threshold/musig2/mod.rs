@@ -14,7 +14,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::threshold::musig2;
+//! use chains_sdk::threshold::musig2;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Two signers with their own key pairs

@@ -1,10 +1,10 @@
-//! trad-signer CLI — key generation, signing, and verification.
+//! chains-sdk CLI — key generation, signing, and verification.
 //!
 //! Usage:
-//!   trad-signer keygen <chain>
-//!   trad-signer sign <chain> <hex-key> <message>
-//!   trad-signer verify <chain> <hex-pubkey> <hex-signature> <message>
-//!   trad-signer address <chain> <hex-key>
+//!   chains-sdk keygen <chain>
+//!   chains-sdk sign <chain> <hex-key> <message>
+//!   chains-sdk verify <chain> <hex-pubkey> <hex-signature> <message>
+//!   chains-sdk address <chain> <hex-key>
 
 use std::env;
 use std::process;
@@ -23,21 +23,21 @@ fn main() {
         "keygen" => cmd_keygen(chain),
         "sign" => {
             if args.len() < 5 {
-                eprintln!("Usage: trad-signer sign <chain> <hex-key> <message>");
+                eprintln!("Usage: chains-sdk sign <chain> <hex-key> <message>");
                 process::exit(1);
             }
             cmd_sign(chain, &args[3], &args[4]);
         }
         "verify" => {
             if args.len() < 6 {
-                eprintln!("Usage: trad-signer verify <chain> <hex-pubkey> <hex-sig> <message>");
+                eprintln!("Usage: chains-sdk verify <chain> <hex-pubkey> <hex-sig> <message>");
                 process::exit(1);
             }
             cmd_verify(chain, &args[3], &args[4], &args[5]);
         }
         "address" => {
             if args.len() < 4 {
-                eprintln!("Usage: trad-signer address <chain> <hex-key>");
+                eprintln!("Usage: chains-sdk address <chain> <hex-key>");
                 process::exit(1);
             }
             cmd_address(chain, &args[3]);
@@ -51,7 +51,7 @@ fn main() {
 }
 
 fn print_usage() {
-    eprintln!("trad-signer CLI v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!("chains-sdk CLI v{}", env!("CARGO_PKG_VERSION"));
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  keygen  <chain>                          Generate a new key pair");
@@ -63,11 +63,11 @@ fn print_usage() {
 }
 
 fn cmd_keygen(chain: &str) {
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::traits::{KeyPair, Signer};
 
     match chain {
         "ethereum" | "eth" => {
-            let signer = trad_signer::ethereum::EthereumSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::ethereum::EthereumSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             println!("private_key: {sk}");
@@ -75,7 +75,7 @@ fn cmd_keygen(chain: &str) {
             println!("address:     {}", signer.address_checksum());
         }
         "bitcoin" | "btc" => {
-            let signer = trad_signer::bitcoin::BitcoinSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::bitcoin::BitcoinSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             let wif = signer.to_wif();
@@ -88,7 +88,7 @@ fn cmd_keygen(chain: &str) {
             }
         }
         "solana" | "sol" => {
-            let signer = trad_signer::solana::SolanaSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::solana::SolanaSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             println!("private_key: {sk}");
@@ -96,7 +96,7 @@ fn cmd_keygen(chain: &str) {
             println!("address:     {}", signer.address());
         }
         "xrp" => {
-            let signer = trad_signer::xrp::XrpEcdsaSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::xrp::XrpEcdsaSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             println!("private_key: {sk}");
@@ -106,7 +106,7 @@ fn cmd_keygen(chain: &str) {
             }
         }
         "neo" => {
-            let signer = trad_signer::neo::NeoSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::neo::NeoSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             println!("private_key: {sk}");
@@ -114,7 +114,7 @@ fn cmd_keygen(chain: &str) {
             println!("address:     {}", signer.address());
         }
         "bls" => {
-            let signer = trad_signer::bls::BlsSigner::generate().expect("keygen failed");
+            let signer = chains_sdk::bls::BlsSigner::generate().expect("keygen failed");
             let pk = hex::encode(Signer::public_key_bytes(&signer));
             let sk = hex::encode(&*signer.private_key_bytes());
             println!("private_key: {sk}");
@@ -129,14 +129,14 @@ fn cmd_keygen(chain: &str) {
 }
 
 fn cmd_sign(chain: &str, hex_key: &str, message: &str) {
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::traits::{KeyPair, Signer};
     let key_bytes = hex::decode(hex_key).expect("invalid hex key");
     let msg = message.as_bytes();
 
     match chain {
         "ethereum" | "eth" => {
             let signer =
-                trad_signer::ethereum::EthereumSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::ethereum::EthereumSigner::from_bytes(&key_bytes).expect("invalid key");
             let sig = signer.sign(msg).expect("sign failed");
             println!("r: {}", hex::encode(sig.r));
             println!("s: {}", hex::encode(sig.s));
@@ -144,18 +144,18 @@ fn cmd_sign(chain: &str, hex_key: &str, message: &str) {
         }
         "bitcoin" | "btc" => {
             let signer =
-                trad_signer::bitcoin::BitcoinSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::bitcoin::BitcoinSigner::from_bytes(&key_bytes).expect("invalid key");
             let sig = signer.sign(msg).expect("sign failed");
             println!("signature: {}", hex::encode(sig.to_bytes()));
         }
         "solana" | "sol" => {
             let signer =
-                trad_signer::solana::SolanaSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::solana::SolanaSigner::from_bytes(&key_bytes).expect("invalid key");
             let sig = signer.sign(msg).expect("sign failed");
             println!("signature: {}", hex::encode(sig.to_bytes()));
         }
         "bls" => {
-            let signer = trad_signer::bls::BlsSigner::from_bytes(&key_bytes).expect("invalid key");
+            let signer = chains_sdk::bls::BlsSigner::from_bytes(&key_bytes).expect("invalid key");
             let sig = signer.sign(msg).expect("sign failed");
             println!("signature: {}", hex::encode(sig.to_bytes()));
         }
@@ -167,26 +167,26 @@ fn cmd_sign(chain: &str, hex_key: &str, message: &str) {
 }
 
 fn cmd_verify(chain: &str, hex_pubkey: &str, hex_sig: &str, message: &str) {
-    use trad_signer::traits::Verifier;
+    use chains_sdk::traits::Verifier;
     let pk_bytes = hex::decode(hex_pubkey).expect("invalid hex pubkey");
     let sig_bytes = hex::decode(hex_sig).expect("invalid hex signature");
     let msg = message.as_bytes();
 
     match chain {
         "solana" | "sol" => {
-            let verifier = trad_signer::solana::SolanaVerifier::from_public_key_bytes(&pk_bytes)
+            let verifier = chains_sdk::solana::SolanaVerifier::from_public_key_bytes(&pk_bytes)
                 .expect("invalid pubkey");
             let sig =
-                trad_signer::solana::SolanaSignature::from_bytes(&sig_bytes).expect("invalid sig");
+                chains_sdk::solana::SolanaSignature::from_bytes(&sig_bytes).expect("invalid sig");
             match verifier.verify(msg, &sig) {
                 Ok(true) => println!("✓ valid"),
                 _ => println!("✗ invalid"),
             }
         }
         "bls" => {
-            let verifier = trad_signer::bls::BlsVerifier::from_public_key_bytes(&pk_bytes)
+            let verifier = chains_sdk::bls::BlsVerifier::from_public_key_bytes(&pk_bytes)
                 .expect("invalid pubkey");
-            let sig = trad_signer::bls::BlsSignature::from_bytes(&sig_bytes).expect("invalid sig");
+            let sig = chains_sdk::bls::BlsSignature::from_bytes(&sig_bytes).expect("invalid sig");
             match verifier.verify(msg, &sig) {
                 Ok(true) => println!("✓ valid"),
                 _ => println!("✗ invalid"),
@@ -200,18 +200,18 @@ fn cmd_verify(chain: &str, hex_pubkey: &str, hex_sig: &str, message: &str) {
 }
 
 fn cmd_address(chain: &str, hex_key: &str) {
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::traits::KeyPair;
     let key_bytes = hex::decode(hex_key).expect("invalid hex key");
 
     match chain {
         "ethereum" | "eth" => {
             let signer =
-                trad_signer::ethereum::EthereumSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::ethereum::EthereumSigner::from_bytes(&key_bytes).expect("invalid key");
             println!("{}", signer.address_checksum());
         }
         "bitcoin" | "btc" => {
             let signer =
-                trad_signer::bitcoin::BitcoinSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::bitcoin::BitcoinSigner::from_bytes(&key_bytes).expect("invalid key");
             println!("p2pkh:  {}", signer.p2pkh_address());
             if let Ok(addr) = signer.p2wpkh_address() {
                 println!("p2wpkh: {addr}");
@@ -219,11 +219,11 @@ fn cmd_address(chain: &str, hex_key: &str) {
         }
         "solana" | "sol" => {
             let signer =
-                trad_signer::solana::SolanaSigner::from_bytes(&key_bytes).expect("invalid key");
+                chains_sdk::solana::SolanaSigner::from_bytes(&key_bytes).expect("invalid key");
             println!("{}", signer.address());
         }
         "neo" => {
-            let signer = trad_signer::neo::NeoSigner::from_bytes(&key_bytes).expect("invalid key");
+            let signer = chains_sdk::neo::NeoSigner::from_bytes(&key_bytes).expect("invalid key");
             println!("{}", signer.address());
         }
         _ => {

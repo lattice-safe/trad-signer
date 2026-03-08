@@ -5,9 +5,9 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::ethereum::transaction::EIP1559Transaction;
-//! use trad_signer::ethereum::EthereumSigner;
-//! use trad_signer::traits::KeyPair;
+//! use chains_sdk::ethereum::transaction::EIP1559Transaction;
+//! use chains_sdk::ethereum::EthereumSigner;
+//! use chains_sdk::traits::KeyPair;
 //!
 //! fn example() -> Result<(), Box<dyn std::error::Error>> {
 //!     let signer = EthereumSigner::generate()?;
@@ -508,7 +508,7 @@ pub struct DecodedTransaction {
 ///
 /// # Example
 /// ```no_run
-/// use trad_signer::ethereum::transaction::decode_signed_tx;
+/// use chains_sdk::ethereum::transaction::decode_signed_tx;
 ///
 /// fn example(raw_tx: &[u8]) {
 ///     let decoded = decode_signed_tx(raw_tx).unwrap();

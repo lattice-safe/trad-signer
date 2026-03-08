@@ -78,7 +78,7 @@ pub fn secure_zero(data: &mut [u8]) {
 ///
 /// # Example
 /// ```
-/// use trad_signer::security::GuardedMemory;
+/// use chains_sdk::security::GuardedMemory;
 ///
 /// let mut guard = GuardedMemory::new(32);
 /// guard.as_mut()[..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
@@ -234,7 +234,7 @@ std::thread_local! {
 ///
 /// # Example
 /// ```ignore
-/// trad_signer::security::set_custom_rng(Box::new(|buf| {
+/// chains_sdk::security::set_custom_rng(Box::new(|buf| {
 ///     // Fill from hardware TRNG
 ///     my_enclave_trng_fill(buf);
 ///     Ok(())
@@ -259,7 +259,7 @@ pub fn clear_custom_rng() {
 
 /// Enclave attestation context for remote verification.
 ///
-/// Implement this trait to integrate trad-signer with your enclave's
+/// Implement this trait to integrate chains-sdk with your enclave's
 /// attestation mechanism (SGX quotes, Nitro attestation documents,
 /// TDX reports, etc.).
 ///
@@ -315,9 +315,9 @@ pub trait EnclaveContext {
 ///
 /// # Example
 /// ```
-/// use trad_signer::security::rotate_key;
-/// use trad_signer::ethereum::EthereumSigner;
-/// use trad_signer::traits::{KeyPair, Signer};
+/// use chains_sdk::security::rotate_key;
+/// use chains_sdk::ethereum::EthereumSigner;
+/// use chains_sdk::traits::{KeyPair, Signer};
 ///
 /// let old_signer = EthereumSigner::generate().unwrap();
 /// let old_pubkey = old_signer.public_key_bytes();

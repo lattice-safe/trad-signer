@@ -22,7 +22,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::threshold::frost::{keygen, signing};
+//! use chains_sdk::threshold::frost::{keygen, signing};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Dealer generates 2-of-3 key shares

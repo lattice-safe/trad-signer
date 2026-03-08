@@ -7,15 +7,15 @@ use proptest::prelude::*;
 #[cfg(feature = "ethereum")]
 mod ethereum_props {
     use super::*;
-    use trad_signer::ethereum::EthereumSigner;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::ethereum::EthereumSigner;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     proptest! {
         #[test]
         fn sign_verify_roundtrip(msg in prop::collection::vec(any::<u8>(), 0..1024)) {
             let signer = EthereumSigner::generate().unwrap();
             let sig = signer.sign(&msg).unwrap();
-            let verifier = trad_signer::ethereum::EthereumVerifier::from_public_key_bytes(
+            let verifier = chains_sdk::ethereum::EthereumVerifier::from_public_key_bytes(
                 &Signer::public_key_bytes(&signer),
             ).unwrap();
             prop_assert!(verifier.verify(&msg, &sig).unwrap());
@@ -53,8 +53,8 @@ mod ethereum_props {
 #[cfg(feature = "bitcoin")]
 mod bitcoin_props {
     use super::*;
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     proptest! {
         #[test]
@@ -81,15 +81,15 @@ mod bitcoin_props {
 #[cfg(feature = "bls")]
 mod bls_props {
     use super::*;
-    use trad_signer::bls::BlsSigner;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::bls::BlsSigner;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     proptest! {
         #[test]
         fn bls_sign_verify_roundtrip(msg in prop::collection::vec(any::<u8>(), 1..256)) {
             let signer = BlsSigner::generate().unwrap();
             let sig = signer.sign(&msg).unwrap();
-            let verifier = trad_signer::bls::BlsVerifier::from_public_key_bytes(
+            let verifier = chains_sdk::bls::BlsVerifier::from_public_key_bytes(
                 &Signer::public_key_bytes(&signer),
             ).unwrap();
             prop_assert!(verifier.verify(&msg, &sig).unwrap());
@@ -111,15 +111,15 @@ mod bls_props {
 #[cfg(feature = "solana")]
 mod solana_props {
     use super::*;
-    use trad_signer::solana::SolanaSigner;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::solana::SolanaSigner;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     proptest! {
         #[test]
         fn solana_sign_verify_roundtrip(msg in prop::collection::vec(any::<u8>(), 1..256)) {
             let signer = SolanaSigner::generate().unwrap();
             let sig = signer.sign(&msg).unwrap();
-            let verifier = trad_signer::solana::SolanaVerifier::from_public_key_bytes(
+            let verifier = chains_sdk::solana::SolanaVerifier::from_public_key_bytes(
                 &Signer::public_key_bytes(&signer),
             ).unwrap();
             prop_assert!(verifier.verify(&msg, &sig).unwrap());

@@ -6,8 +6,8 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::hd_key::ExtendedPrivateKey;
-//! use trad_signer::bip85;
+//! use chains_sdk::hd_key::ExtendedPrivateKey;
+//! use chains_sdk::bip85;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let seed = [0xab_u8; 64];

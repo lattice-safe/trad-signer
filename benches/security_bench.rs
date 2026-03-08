@@ -1,4 +1,4 @@
-//! Benchmarks for trad-signer security operations.
+//! Benchmarks for chains-sdk security operations.
 //!
 //! Compares constant-time vs standard implementations and measures
 //! enclave-critical operations like GuardedMemory and scrypt KDF.
@@ -10,7 +10,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 // ─── Constant-Time Hex vs Standard Hex ─────────────────────────────
 
 fn bench_ct_hex_encode(c: &mut Criterion) {
-    use trad_signer::security::{ct_hex_decode, ct_hex_encode};
+    use chains_sdk::security::{ct_hex_decode, ct_hex_encode};
 
     let sizes: &[usize] = &[32, 64, 256, 1024];
 
@@ -47,7 +47,7 @@ fn bench_ct_hex_encode(c: &mut Criterion) {
 // ─── GuardedMemory Allocation ──────────────────────────────────────
 
 fn bench_guarded_memory(c: &mut Criterion) {
-    use trad_signer::security::GuardedMemory;
+    use chains_sdk::security::GuardedMemory;
 
     let mut group = c.benchmark_group("guarded_memory");
 
@@ -90,7 +90,7 @@ fn bench_guarded_memory(c: &mut Criterion) {
 // ─── Secure Zero ───────────────────────────────────────────────────
 
 fn bench_secure_zero(c: &mut Criterion) {
-    use trad_signer::security::secure_zero;
+    use chains_sdk::security::secure_zero;
 
     let mut group = c.benchmark_group("secure_zero");
     for &size in &[32usize, 256, 4096] {
@@ -121,8 +121,8 @@ fn bench_secure_zero(c: &mut Criterion) {
 // ─── Scrypt KDF (Keystore Encrypt/Decrypt) ─────────────────────────
 
 fn bench_scrypt_kdf(c: &mut Criterion) {
-    use trad_signer::ethereum::keystore::Keystore;
-    use trad_signer::ethereum::keystore::ScryptParams;
+    use chains_sdk::ethereum::keystore::Keystore;
+    use chains_sdk::ethereum::keystore::ScryptParams;
 
     let private_key = [0x42_u8; 32];
     let password = b"benchmark-password-2024";
@@ -188,7 +188,7 @@ fn bench_scrypt_kdf(c: &mut Criterion) {
 // ─── Solana PDA Derivation ─────────────────────────────────────────
 
 fn bench_pda(c: &mut Criterion) {
-    use trad_signer::solana::transaction::{create_program_address, find_program_address};
+    use chains_sdk::solana::transaction::{create_program_address, find_program_address};
 
     let program_id = [0xAA_u8; 32];
 
@@ -217,9 +217,9 @@ fn bench_pda(c: &mut Criterion) {
 // ─── Ed25519 Key Generation vs Signing (Baseline) ──────────────────
 
 fn bench_ed25519_ops(c: &mut Criterion) {
-    use trad_signer::solana::SolanaSigner;
-    use trad_signer::solana::SolanaVerifier;
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::solana::SolanaSigner;
+    use chains_sdk::solana::SolanaVerifier;
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     let mut group = c.benchmark_group("ed25519");
     let signer = SolanaSigner::from_bytes(&[0x42; 32]).unwrap();

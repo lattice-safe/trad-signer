@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::bitcoin::tapscript::{Script, Opcode};
+//! use chains_sdk::bitcoin::tapscript::{Script, Opcode};
 //!
 //! // Simple "check signature" script
 //! let pubkey = [0xAA_u8; 32];

@@ -2,8 +2,8 @@
 
 #[cfg(feature = "ethereum")]
 mod eip155 {
-    use trad_signer::ethereum::EthereumSigner;
-    use trad_signer::traits::{KeyPair, Signer};
+    use chains_sdk::ethereum::EthereumSigner;
+    use chains_sdk::traits::{KeyPair, Signer};
 
     #[test]
     fn test_eip155_mainnet_v_value() {
@@ -30,7 +30,7 @@ mod eip155 {
         let msg = b"EIP-155 recovery test";
         // Standard (pre-EIP-155) signing — v=27/28
         let sig = signer.sign(msg).unwrap();
-        let recovered = trad_signer::ethereum::ecrecover(msg, &sig).unwrap();
+        let recovered = chains_sdk::ethereum::ecrecover(msg, &sig).unwrap();
         assert_eq!(recovered, signer.address());
     }
 
@@ -65,7 +65,7 @@ mod eip155 {
 
 #[cfg(feature = "hd_key")]
 mod xpub_xprv {
-    use trad_signer::hd_key::ExtendedPrivateKey;
+    use chains_sdk::hd_key::ExtendedPrivateKey;
 
     #[test]
     fn test_xprv_starts_with_xprv() {
@@ -142,12 +142,12 @@ mod xpub_xprv {
 
 #[cfg(feature = "bitcoin")]
 mod btc_message_signing {
-    use trad_signer::bitcoin::schnorr::SchnorrSigner;
-    use trad_signer::bitcoin::{
+    use chains_sdk::bitcoin::schnorr::SchnorrSigner;
+    use chains_sdk::bitcoin::{
         bitcoin_message_hash, validate_address, validate_mainnet_address, validate_testnet_address,
         BitcoinSigner,
     };
-    use trad_signer::traits::{KeyPair, Signer, Verifier};
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
     #[test]
     fn test_message_hash_deterministic() {
@@ -170,10 +170,9 @@ mod btc_message_signing {
         // Should be a valid DER signature
         assert!(!sig.to_bytes().is_empty());
         // Verify: manually hash and verify
-        let verifier = trad_signer::bitcoin::BitcoinVerifier::from_public_key_bytes(
-            &signer.public_key_bytes(),
-        )
-        .unwrap();
+        let verifier =
+            chains_sdk::bitcoin::BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes())
+                .unwrap();
         let digest = bitcoin_message_hash(b"test message");
         assert!(verifier.verify_prehashed(&digest, &sig).is_ok());
     }
@@ -182,10 +181,9 @@ mod btc_message_signing {
     fn test_sign_message_wrong_msg_fails_verify() {
         let signer = BitcoinSigner::generate().unwrap();
         let sig = signer.sign_message(b"message A").unwrap();
-        let verifier = trad_signer::bitcoin::BitcoinVerifier::from_public_key_bytes(
-            &signer.public_key_bytes(),
-        )
-        .unwrap();
+        let verifier =
+            chains_sdk::bitcoin::BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes())
+                .unwrap();
         // Verify with wrong message digest — should fail verification
         let wrong_digest = bitcoin_message_hash(b"message B");
         let result = verifier.verify_prehashed(&wrong_digest, &sig);
@@ -302,8 +300,8 @@ mod btc_message_signing {
 
 #[cfg(feature = "mnemonic")]
 mod mnemonic_integration {
-    use trad_signer::hd_key::{DerivationPath, ExtendedPrivateKey};
-    use trad_signer::mnemonic::Mnemonic;
+    use chains_sdk::hd_key::{DerivationPath, ExtendedPrivateKey};
+    use chains_sdk::mnemonic::Mnemonic;
 
     #[test]
     fn test_mnemonic_to_btc_address() {
@@ -365,8 +363,8 @@ mod mnemonic_integration {
 
 #[cfg(feature = "bitcoin")]
 mod wif_tests {
-    use trad_signer::bitcoin::BitcoinSigner;
-    use trad_signer::traits::KeyPair;
+    use chains_sdk::bitcoin::BitcoinSigner;
+    use chains_sdk::traits::KeyPair;
 
     #[test]
     fn test_wif_starts_with_k_or_l() {
@@ -418,7 +416,7 @@ mod wif_tests {
 
 #[cfg(feature = "hd_key")]
 mod fingerprint_tests {
-    use trad_signer::hd_key::{DerivationPath, ExtendedPrivateKey};
+    use chains_sdk::hd_key::{DerivationPath, ExtendedPrivateKey};
 
     #[test]
     fn test_master_key_has_zero_fingerprint() {
@@ -465,7 +463,7 @@ mod fingerprint_tests {
 
 #[cfg(feature = "mnemonic")]
 mod mnemonic_signer_helpers {
-    use trad_signer::mnemonic::Mnemonic;
+    use chains_sdk::mnemonic::Mnemonic;
 
     #[cfg(feature = "ethereum")]
     #[test]
@@ -491,7 +489,7 @@ mod mnemonic_signer_helpers {
         let m = Mnemonic::generate(12).unwrap();
         let signer = m.to_solana_signer("", 0).unwrap();
         let addr = signer.address();
-        assert!(trad_signer::solana::validate_address(&addr));
+        assert!(chains_sdk::solana::validate_address(&addr));
     }
 
     #[cfg(feature = "xrp")]
@@ -517,7 +515,7 @@ mod mnemonic_signer_helpers {
 
 #[cfg(feature = "hd_key")]
 mod derivation_path_parse {
-    use trad_signer::hd_key::DerivationPath;
+    use chains_sdk::hd_key::DerivationPath;
 
     #[test]
     fn test_parse_ethereum_path() {

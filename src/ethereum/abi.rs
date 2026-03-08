@@ -16,7 +16,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::ethereum::abi::{Function, AbiValue};
+//! use chains_sdk::ethereum::abi::{Function, AbiValue};
 //!
 //! let func = Function::new("transfer(address,uint256)");
 //! let calldata = func.encode(&[
@@ -184,7 +184,7 @@ pub fn encode_packed_and_hash(values: &[AbiValue]) -> [u8; 32] {
 ///
 /// # Example
 /// ```no_run
-/// use trad_signer::ethereum::abi::{Function, AbiValue};
+/// use chains_sdk::ethereum::abi::{Function, AbiValue};
 ///
 /// let transfer = Function::new("transfer(address,uint256)");
 /// assert_eq!(hex::encode(transfer.selector()), "a9059cbb");
@@ -383,7 +383,7 @@ pub fn deploy_contract(
 ///
 /// # Example
 /// ```no_run
-/// use trad_signer::ethereum::abi::{ContractCall, AbiValue};
+/// use chains_sdk::ethereum::abi::{ContractCall, AbiValue};
 ///
 /// let call = ContractCall::new([0xAA; 20], "transfer(address,uint256)")
 ///     .args(&[AbiValue::Address([0xBB; 20]), AbiValue::from_u128(1_000_000)])

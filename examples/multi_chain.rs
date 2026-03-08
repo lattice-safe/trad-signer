@@ -3,7 +3,7 @@
 //! Shows how the same key bytes produce different results on different chains,
 //! and demonstrates the unified trait API.
 
-use trad_signer::traits::{KeyPair, Signer, Verifier};
+use chains_sdk::traits::{KeyPair, Signer, Verifier};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seed = hex::decode("e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35")?;
@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── Ethereum ────────────────────────────────────────────────────
     {
-        use trad_signer::ethereum::{EthereumSigner, EthereumVerifier};
+        use chains_sdk::ethereum::{EthereumSigner, EthereumVerifier};
 
         let signer = EthereumSigner::from_bytes(&seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── Bitcoin ─────────────────────────────────────────────────────
     {
-        use trad_signer::bitcoin::{BitcoinSigner, BitcoinVerifier};
+        use chains_sdk::bitcoin::{BitcoinSigner, BitcoinVerifier};
 
         let signer = BitcoinSigner::from_bytes(&seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── Bitcoin Schnorr ─────────────────────────────────────────────
     {
-        use trad_signer::bitcoin::schnorr::{SchnorrSigner, SchnorrVerifier};
+        use chains_sdk::bitcoin::schnorr::{SchnorrSigner, SchnorrVerifier};
 
         let signer = SchnorrSigner::from_bytes(&seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── NEO ─────────────────────────────────────────────────────────
     {
-        use trad_signer::neo::{NeoSigner, NeoVerifier};
+        use chains_sdk::neo::{NeoSigner, NeoVerifier};
 
         let signer = NeoSigner::from_bytes(&seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── Solana ──────────────────────────────────────────────────────
     {
-        use trad_signer::solana::{SolanaSigner, SolanaVerifier};
+        use chains_sdk::solana::{SolanaSigner, SolanaVerifier};
 
         let signer = SolanaSigner::from_bytes(&ed_seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ─── XRP Ed25519 ─────────────────────────────────────────────────
     {
-        use trad_signer::xrp::{XrpEddsaSigner, XrpEddsaVerifier};
+        use chains_sdk::xrp::{XrpEddsaSigner, XrpEddsaVerifier};
 
         let signer = XrpEddsaSigner::from_bytes(&ed_seed)?;
         let sig = signer.sign(b"hello world")?;
@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ─── BLS12-381 ───────────────────────────────────────────────────
     println!("\n=== BLS Aggregation ===\n");
     {
-        use trad_signer::bls::{aggregate_signatures, verify_aggregated, BlsSigner};
+        use chains_sdk::bls::{aggregate_signatures, verify_aggregated, BlsSigner};
 
         let s1 = BlsSigner::generate()?;
         let s2 = BlsSigner::generate()?;

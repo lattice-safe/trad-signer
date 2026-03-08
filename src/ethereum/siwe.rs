@@ -5,9 +5,9 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::ethereum::siwe::SiweMessage;
-//! use trad_signer::ethereum::EthereumSigner;
-//! use trad_signer::traits::KeyPair;
+//! use chains_sdk::ethereum::siwe::SiweMessage;
+//! use chains_sdk::ethereum::EthereumSigner;
+//! use chains_sdk::traits::KeyPair;
 //!
 //! fn example() -> Result<(), Box<dyn std::error::Error>> {
 //!     let signer = EthereumSigner::generate()?;

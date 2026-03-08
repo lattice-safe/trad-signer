@@ -5,8 +5,8 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::mnemonic::Mnemonic;
-//! use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
+//! use chains_sdk::mnemonic::Mnemonic;
+//! use chains_sdk::hd_key::{ExtendedPrivateKey, DerivationPath};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mnemonic = Mnemonic::generate(12)?; // 12-word phrase

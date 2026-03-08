@@ -3,9 +3,9 @@
 //! Demonstrates key generation, signing, verification,
 //! address derivation, and EIP-712 typed data signing.
 
+use chains_sdk::ethereum::{eip712_hash, Eip712Domain, EthereumSigner, EthereumVerifier};
+use chains_sdk::traits::{KeyPair, Signer, Verifier};
 use sha3::{Digest, Keccak256};
-use trad_signer::ethereum::{eip712_hash, Eip712Domain, EthereumSigner, EthereumVerifier};
-use trad_signer::traits::{KeyPair, Signer, Verifier};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ─── Key Generation ──────────────────────────────────────────────
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // ─── Sign & Verify ───────────────────────────────────────────────
-    let message = b"Hello from trad-signer!";
+    let message = b"Hello from chains-sdk!";
     let sig = signer.sign(message)?;
     println!("\nSignature:");
     println!("  r: {}", hex::encode(sig.r));

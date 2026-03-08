@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use trad_signer::bitcoin::descriptor::{Descriptor, DescriptorKey};
+//! use chains_sdk::bitcoin::descriptor::{Descriptor, DescriptorKey};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let key = DescriptorKey::from_hex("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")?;
