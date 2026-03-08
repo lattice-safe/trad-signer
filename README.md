@@ -1,137 +1,202 @@
 # trad-signer
 
-> Unified, secure multi-chain signing library for Rust.
+**Unified, secure multi-chain signing SDK for Rust.** Supports ECDSA (secp256k1, P-256), EdDSA (Ed25519), BLS12-381, and Schnorr (BIP-340) — with BIP-32/39/44 HD key derivation, address generation, and full serde support.
 
-[![CI](https://github.com/lattice-safe/trad-signer/actions/workflows/ci.yml/badge.svg)](https://github.com/lattice-safe/trad-signer/actions)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/trad-signer.svg)](https://crates.io/crates/trad-signer)
+[![License](https://img.shields.io/crates/l/trad-signer.svg)](LICENSE)
 
-## Overview
+## Supported Chains
 
-**trad-signer** consolidates all major blockchain signing algorithms into a single, reliable Rust crate with a unified trait-based API. Every module is feature-gated so you only compile what you need.
-
-| Algorithm | Curve | Hash | Blockchain | Feature |
-|-----------|-------|------|------------|---------|
-| ECDSA | secp256k1 | Keccak-256 | Ethereum | `ethereum` |
-| ECDSA | secp256k1 | Double SHA-256 | Bitcoin | `bitcoin` |
-| Schnorr | secp256k1 (BIP-340) | Tagged SHA-256 | Bitcoin | `bitcoin` |
-| ECDSA | P-256 | SHA-256 | NEO | `neo` |
-| ECDSA | secp256k1 | SHA-512 half | XRP | `xrp` |
-| EdDSA | Ed25519 | — | XRP, Solana | `xrp`, `solana` |
-| BLS | BLS12-381 | SHA-256 | Ethereum PoS | `bls` |
+| Chain | Curve | Addresses | Message Signing |
+|-------|-------|-----------|-----------------|
+| **Ethereum** | secp256k1 | EIP-55 checksum | EIP-191, EIP-712, EIP-155 |
+| **Bitcoin** | secp256k1 | P2PKH, P2WPKH, P2TR | BIP-137 |
+| **Bitcoin (Taproot)** | Schnorr (BIP-340) | P2TR (Bech32m) | — |
+| **Solana** | Ed25519 | Base58 | — |
+| **XRP** | secp256k1 + Ed25519 | r-address | — |
+| **NEO** | P-256 (secp256r1) | A-address | — |
+| **BLS** | BLS12-381 | — | Aggregated signatures |
 
 ## Quick Start
 
 ```toml
 [dependencies]
-trad-signer = { version = "0.1", features = ["ethereum", "solana"] }
+trad-signer = "0.3"
 ```
 
-### Ethereum ECDSA
+### Generate Keys & Sign
 
 ```rust
 use trad_signer::ethereum::EthereumSigner;
 use trad_signer::traits::{KeyPair, Signer};
 
 let signer = EthereumSigner::generate()?;
-let sig = signer.sign(b"hello ethereum")?;
-println!("Address: 0x{}", hex::encode(signer.address()));
-println!("v={}, r={}, s={}", sig.v, hex::encode(sig.r), hex::encode(sig.s));
+let signature = signer.sign(b"hello world")?;
+
+// EIP-55 checksummed address
+println!("Address: {}", signer.address_checksum());
 ```
 
-### EIP-712 Typed Data
+### EIP-155 Chain-Aware Signing
 
 ```rust
-use trad_signer::ethereum::{EthereumSigner, Eip712Domain};
-use trad_signer::traits::KeyPair;
+use trad_signer::ethereum::EthereumSigner;
+use trad_signer::traits::{KeyPair, Signer};
 
 let signer = EthereumSigner::generate()?;
-let domain = Eip712Domain {
-    name: "MyDapp",
-    version: "1",
-    chain_id: 1,
-    verifying_contract: &[0xCC; 20],
-};
-let sig = signer.sign_typed_data(&domain.separator(), &struct_hash)?;
+
+// Mainnet (chain_id = 1): v = 37 or 38
+let sig = signer.sign_with_chain_id(b"tx data", 1)?;
+
+// Polygon (chain_id = 137)
+let sig = signer.sign_with_chain_id(b"tx data", 137)?;
 ```
 
-### Solana Ed25519
+### ecrecover
+
+```rust
+use trad_signer::ethereum::{EthereumSigner, ecrecover};
+use trad_signer::traits::{KeyPair, Signer};
+
+let signer = EthereumSigner::generate()?;
+let sig = signer.sign(b"verify me")?;
+let recovered_address = ecrecover(b"verify me", &sig)?;
+assert_eq!(recovered_address, signer.address());
+```
+
+### BIP-39 Mnemonic → HD Keys
+
+```rust
+use trad_signer::mnemonic::Mnemonic;
+use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
+
+// Generate 24-word mnemonic
+let mnemonic = Mnemonic::generate(24)?;
+println!("Seed phrase: {}", mnemonic.phrase());
+
+// Derive seed (with optional passphrase)
+let seed = mnemonic.to_seed("optional passphrase");
+
+// BIP-32 master key → BIP-44 Ethereum path
+let master = ExtendedPrivateKey::from_seed(&*seed)?;
+let eth_key = master.derive_path(&DerivationPath::ethereum(0))?;
+let btc_key = master.derive_path(&DerivationPath::bitcoin(0))?;
+let sol_key = master.derive_path(&DerivationPath::solana(0))?;
+
+// Export as xprv/xpub
+println!("xprv: {}", master.to_xprv());
+println!("xpub: {}", master.to_xpub()?);
+```
+
+### Bitcoin Addresses
+
+```rust
+use trad_signer::bitcoin::BitcoinSigner;
+use trad_signer::bitcoin::schnorr::SchnorrSigner;
+use trad_signer::traits::KeyPair;
+
+let signer = BitcoinSigner::generate()?;
+println!("P2PKH:  {}", signer.p2pkh_address());           // 1...
+println!("P2WPKH: {}", signer.p2wpkh_address()?);          // bc1q...
+println!("P2PKH (testnet): {}", signer.p2pkh_testnet_address()); // m.../n...
+println!("P2WPKH (testnet): {}", signer.p2wpkh_testnet_address()?); // tb1q...
+
+let schnorr = SchnorrSigner::generate()?;
+println!("P2TR:   {}", schnorr.p2tr_address()?);            // bc1p...
+println!("P2TR (testnet): {}", schnorr.p2tr_testnet_address()?); // tb1p...
+
+// BIP-137 message signing
+let sig = signer.sign_message(b"Hello Bitcoin")?;
+```
+
+### Address Validation
+
+```rust
+use trad_signer::bitcoin::validate_address;
+use trad_signer::ethereum::validate_address as validate_eth;
+use trad_signer::solana::validate_address as validate_sol;
+
+assert!(validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"));    // BTC P2PKH
+assert!(validate_address("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")); // BTC P2WPKH
+assert!(validate_eth("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")); // ETH EIP-55
+assert!(validate_sol("11111111111111111111111111111112"));             // Solana
+```
+
+### Multi-Chain Signing
 
 ```rust
 use trad_signer::solana::SolanaSigner;
+use trad_signer::xrp::XrpEcdsaSigner;
+use trad_signer::neo::NeoSigner;
 use trad_signer::traits::{KeyPair, Signer};
 
-let signer = SolanaSigner::generate()?;
-let sig = signer.sign(b"hello solana")?;
+// Solana
+let sol = SolanaSigner::generate()?;
+let sig = sol.sign(b"solana message")?;
+println!("Solana address: {}", sol.address());
+
+// XRP
+let xrp = XrpEcdsaSigner::generate()?;
+let sig = xrp.sign(b"xrp payload")?;
+println!("XRP address: {}", xrp.address()?);
+
+// NEO
+let neo = NeoSigner::generate()?;
+let sig = neo.sign(b"neo data")?;
+println!("NEO address: {}", neo.address());
 ```
 
-### Bitcoin Schnorr (BIP-340)
+### BLS Aggregated Signatures
 
 ```rust
-use trad_signer::bitcoin::schnorr::SchnorrSigner;
-use trad_signer::traits::{KeyPair, Signer};
+use trad_signer::bls::{BlsSigner, BlsVerifier};
+use trad_signer::traits::{KeyPair, Signer, Verifier};
 
-let signer = SchnorrSigner::generate()?;
-let sig = signer.sign(b"hello bitcoin")?;
-assert_eq!(signer.public_key_bytes().len(), 32); // x-only
+let signer1 = BlsSigner::generate()?;
+let signer2 = BlsSigner::generate()?;
+let sig1 = signer1.sign(b"consensus message")?;
+let sig2 = signer2.sign(b"consensus message")?;
+
+// Aggregate verify
+let verifiers = vec![
+    BlsVerifier::from_public_key_bytes(&signer1.public_key_bytes())?,
+    BlsVerifier::from_public_key_bytes(&signer2.public_key_bytes())?,
+];
+let sigs = vec![sig1, sig2];
+assert!(BlsVerifier::verify_aggregated(b"consensus message", &verifiers, &sigs)?);
 ```
 
-### BLS Signature Aggregation
+## Features
 
-```rust
-use trad_signer::bls::{BlsSigner, aggregate_signatures, verify_aggregated};
-use trad_signer::traits::{KeyPair, Signer};
+All chain modules are enabled by default. Disable unused chains to reduce compile time:
 
-let s1 = BlsSigner::generate()?;
-let s2 = BlsSigner::generate()?;
-let msg = b"consensus message";
-
-let sig1 = s1.sign(msg)?;
-let sig2 = s2.sign(msg)?;
-let agg = aggregate_signatures(&[sig1, sig2])?;
-assert!(verify_aggregated(&[s1.public_key(), s2.public_key()], msg, &agg)?);
+```toml
+[dependencies]
+trad-signer = { version = "0.3", default-features = false, features = ["ethereum", "bitcoin"] }
 ```
 
-## Dual-Mode Signing
-
-Every module supports both raw messages and pre-hashed digests:
-
-```rust
-// Raw — module applies chain-specific hashing internally
-let sig = signer.sign(b"raw message")?;
-
-// Pre-hashed — you provide the digest directly
-let sig = signer.sign_prehashed(&digest)?;
-```
+| Feature | Description |
+|---------|-------------|
+| `ethereum` | Ethereum ECDSA + EIP-191/712/155 + ecrecover |
+| `bitcoin` | Bitcoin ECDSA (DER) + P2PKH/P2WPKH + BIP-137 |
+| `solana` | Solana Ed25519 |
+| `xrp` | XRP ECDSA + Ed25519 |
+| `neo` | NEO P-256 ECDSA |
+| `bls` | BLS12-381 (requires C compiler for `blst`) |
+| `hd_key` | BIP-32/44 HD key derivation + xpub/xprv |
+| `mnemonic` | BIP-39 seed phrases (12/15/18/21/24 words) |
+| `serde` | Serialization support for keys and signatures |
 
 ## Security
 
-| Guarantee | Implementation |
-|-----------|---------------|
-| No unsafe code | `#![forbid(unsafe_code)]` |
-| Key zeroization | All signers implement `ZeroizeOnDrop` |
-| Constant-time comparison | `subtle::ConstantTimeEq` |
-| No panics | `#![deny(clippy::unwrap_used)]` |
-| Signature malleability | EIP-2 Low-S, strict DER, Ed25519 strict verification |
-| Dependency audit | `cargo-deny` + `cargo-audit` in CI |
-
-## Feature Flags
-
-```toml
-[features]
-default = ["std", "ethereum", "bitcoin", "solana", "xrp", "neo", "bls"]
-serde = ["dep:serde"]  # Optional private key serialization
-```
-
-## Test Vectors
-
-All implementations are validated against official standards:
-
-- **RFC 6979** — ECDSA deterministic nonces (Bitcoin, Ethereum)
-- **BIP-340** — Schnorr test vectors 0–6 (Bitcoin)
-- **RFC 8032 §7.1** — Ed25519 vectors 1–3 (Solana, XRP)
-- **FIPS 186-4** — P-256 ECDSA (NEO)
-- **ETH2 Consensus Spec** — BLS12-381 DST + aggregation
+- `#![forbid(unsafe_code)]` — zero unsafe blocks
+- `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` — zero panic surface
+- All ECDSA uses **RFC 6979** deterministic nonces
+- All key material wrapped in `Zeroizing` / `ZeroizeOnDrop`
+- Constant-time comparisons via `subtle::ConstantTimeEq`
+- `cargo audit`: **0 vulnerabilities** across 117+ dependencies
+- **216+ tests** including official BIP-32, BIP-39, RFC 6979, BIP-340, RFC 8032, and FIPS 186-4 vectors
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.

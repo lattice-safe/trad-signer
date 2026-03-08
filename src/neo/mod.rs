@@ -75,6 +75,27 @@ impl NeoSigner {
     }
 }
 
+/// Validate a NEO `A...` address string.
+///
+/// Checks: starts with 'A', 25-byte Base58Check decode, version 0x17, valid checksum.
+pub fn validate_address(address: &str) -> bool {
+    if !address.starts_with('A') {
+        return false;
+    }
+    let decoded = match bs58::decode(address).into_vec() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    if decoded.len() != 25 || decoded[0] != 0x17 {
+        return false;
+    }
+    let checksum = {
+        let h1 = Sha256::digest(&decoded[..21]);
+        Sha256::digest(h1)
+    };
+    decoded[21..25] == checksum[..4]
+}
+
 impl Drop for NeoSigner {
     fn drop(&mut self) {
         // p256::SigningKey implements ZeroizeOnDrop internally

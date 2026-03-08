@@ -1,41 +1,57 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [0.2.0] - 2026-03-08
+## [0.3.0] — 2026-03-08
 
 ### Added
-- **EIP-191** `personal_sign()` / `verify_personal_sign()` / `eip191_hash()` (Ethereum)
-- **Multi-message BLS** `verify_aggregated_multi()` for different messages per signer
-- SDK serialization: `public_key_bytes_uncompressed()`, `from_keypair_bytes()`, `keypair_bytes()`
-- Solana `scalar_bytes()` for clamped Ed25519 scalar export
-- Signature `to_bytes()` / `from_bytes()` on all signature types
-- `BlsPublicKey::to_bytes()` / `from_bytes()`
-- Criterion benchmarks (`benches/signing_bench.rs`)
-- `CHANGELOG.md`, `LICENSE-MIT`, `LICENSE-APACHE`
-- 2 runnable examples: `ethereum_signing`, `multi_chain`
 
-### Fixed
-- BLS IKM zeroization: replaced manual loop with `zeroize::Zeroize` (prevents compiler optimization)
+**Address Generation**
+- Ethereum: `address_checksum()` (EIP-55), `eip55_checksum()`
+- Bitcoin: `p2pkh_address()`, `p2wpkh_address()`, `p2tr_address()` (Schnorr)
+- Solana: `address()` (Base58 Ed25519 pubkey)
+- XRP: `address()` for both ECDSA and Ed25519 signers
+- NEO: `address()`, `script_hash()`
 
-### Security
-- Full security audit documented in project artifacts
-- `Zeroizing<Vec<u8>>` on all key exports, `ZeroizeOnDrop` on all signing keys
+**Address Validation**
+- Ethereum: `validate_address()` (hex format + EIP-55 checksum)
+- Bitcoin: `validate_address()`, `validate_mainnet_address()`, `validate_testnet_address()`
+- Solana: `validate_address()` (Base58 32-byte check)
+- XRP: `validate_address()` (r-address checksum)
+- NEO: `validate_address()` (A-address checksum)
 
-## [0.1.0] - 2026-03-07
+**Signing**
+- Ethereum: `ecrecover()`, `ecrecover_digest()` — recover signer from signature
+- Ethereum: `sign_with_chain_id()`, `sign_digest_with_chain_id()` — EIP-155 replay protection
+- Ethereum: `personal_sign_with_chain_id()` — EIP-191 + EIP-155
+- Bitcoin: `sign_message()`, `bitcoin_message_hash()` — BIP-137 message signing
+
+**Testnet Addresses**
+- Bitcoin: `p2pkh_testnet_address()` (m/n...), `p2wpkh_testnet_address()` (tb1q...)
+- Schnorr: `p2tr_testnet_address()` (tb1p...)
+
+**BIP-39 Mnemonic**
+- `Mnemonic::generate(word_count)` — 12/15/18/21/24 words
+- `Mnemonic::from_entropy()` — from raw entropy bytes
+- `Mnemonic::from_phrase()` — parse + validate checksum
+- `Mnemonic::to_seed(passphrase)` — PBKDF2-SHA512
+
+**BIP-32**
+- `ExtendedPrivateKey::to_xprv()` — Base58Check serialization
+- `ExtendedPrivateKey::to_xpub()` — public key serialization
+- `ExtendedPrivateKey::from_xprv()` — deserialization + validation
+
+### Dependencies
+- Added: `bs58` v0.5, `bech32` v0.11, `pbkdf2` v0.12
+- Added: `ripemd` to `bitcoin` and `neo` features
+
+### Tests
+- 216+ tests across lib, address, integration, SDK features, and serde suites
+- BIP-39 official test vectors (entropy → phrase, phrase → seed)
+- BIP-32 known vector: privkey=1 → P2PKH 1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH
+- EIP-55 spec vectors, ecrecover round-trips
+
+## [0.2.0] — 2026-03-07
 
 ### Added
-- Ethereum ECDSA (secp256k1 + Keccak-256, EIP-2 Low-S, EIP-712 typed data)
-- Bitcoin ECDSA (secp256k1 + double-SHA-256, DER encoding, RFC 6979)
-- Bitcoin Schnorr (BIP-340, x-only public keys, tagged hashes)
-- NEO ECDSA (P-256/secp256r1 + SHA-256)
-- XRP ECDSA (secp256k1 + SHA-512 half) and Ed25519
-- Solana Ed25519 (RFC 8032, bit-exact test vectors)
-- BLS12-381 (Ethereum PoS, single signing + aggregation)
-- Unified `Signer`, `Verifier`, `KeyPair` traits
-- CI pipeline (`.github/workflows/ci.yml`)
-- 4 fuzz targets
-- `SECURITY.md`, `README.md`, `deny.toml`
+- Initial release: 6 chain signers + BLS + HD key derivation
+- Full serde support
+- Security hardening: forbid(unsafe), deny(unwrap/expect/panic), zeroize

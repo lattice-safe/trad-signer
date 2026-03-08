@@ -84,6 +84,31 @@ pub fn xrp_address(account_id: &[u8; 20]) -> Result<String, SignerError> {
     Ok(bs58::encode(payload).with_alphabet(&xrp_alphabet()?).into_string())
 }
 
+/// Validate an XRP `r...` address string.
+///
+/// Checks: starts with 'r', 25-byte Base58Check decode, version 0x00, valid checksum.
+pub fn validate_address(address: &str) -> bool {
+    if !address.starts_with('r') {
+        return false;
+    }
+    let alphabet = match xrp_alphabet() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    let decoded = match bs58::decode(address).with_alphabet(&alphabet).into_vec() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    if decoded.len() != 25 || decoded[0] != 0x00 {
+        return false;
+    }
+    let checksum = {
+        let h1 = Sha256::digest(&decoded[..21]);
+        Sha256::digest(h1)
+    };
+    decoded[21..25] == checksum[..4]
+}
+
 // ─── ECDSA (secp256k1) ──────────────────────────────────────────────────────
 
 /// XRP ECDSA signer (secp256k1 + SHA-512 half).

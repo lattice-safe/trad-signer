@@ -208,6 +208,47 @@ pub fn eip55_checksum(address: &[u8; 20]) -> String {
     out
 }
 
+/// Validate an Ethereum address string.
+///
+/// - Must start with `0x` and be 42 characters total
+/// - Must contain only valid hexadecimal characters
+/// - If mixed-case, verifies the EIP-55 checksum
+pub fn validate_address(address: &str) -> bool {
+    if address.len() != 42 || !address.starts_with("0x") {
+        return false;
+    }
+    let hex_part = &address[2..];
+    // Verify all characters are valid hex
+    if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    // If all lowercase or all uppercase, skip checksum verification
+    let has_upper = hex_part.chars().any(|c| c.is_ascii_uppercase());
+    let has_lower = hex_part.chars().any(|c| c.is_ascii_lowercase());
+    if !has_upper || !has_lower {
+        return true; // all-lower or all-upper is valid without checksum
+    }
+    // Mixed case → verify EIP-55 checksum
+    let lower = hex_part.to_lowercase();
+    let lower_bytes = lower.as_bytes();
+    let mut bytes = [0u8; 20];
+    for (i, chunk) in lower_bytes.chunks_exact(2).enumerate() {
+        let hi = match chunk[0] {
+            b'0'..=b'9' => chunk[0] - b'0',
+            b'a'..=b'f' => chunk[0] - b'a' + 10,
+            _ => return false,
+        };
+        let lo = match chunk[1] {
+            b'0'..=b'9' => chunk[1] - b'0',
+            b'a'..=b'f' => chunk[1] - b'a' + 10,
+            _ => return false,
+        };
+        bytes[i] = (hi << 4) | lo;
+    }
+    let checksummed = eip55_checksum(&bytes);
+    checksummed == address
+}
+
 /// **ecrecover**: Recover the signer's Ethereum address from a message and signature.
 ///
 /// Internally keccak256-hashes the message and performs ECDSA recovery.

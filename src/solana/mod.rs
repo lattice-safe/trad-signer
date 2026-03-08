@@ -51,6 +51,16 @@ impl SolanaSigner {
     }
 }
 
+/// Validate a Solana address string.
+///
+/// Solana addresses are Base58-encoded 32-byte Ed25519 public keys.
+pub fn validate_address(address: &str) -> bool {
+    match bs58::decode(address).into_vec() {
+        Ok(bytes) => bytes.len() == 32,
+        Err(_) => false,
+    }
+}
+
 impl Drop for SolanaSigner {
     fn drop(&mut self) {
         // ed25519_dalek::SigningKey handles its own zeroization

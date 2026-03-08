@@ -216,4 +216,114 @@ mod neo {
         // NEO addresses are 34 characters (Base58Check)
         assert_eq!(addr.len(), 34, "NEO address should be 34 chars, got: {}", addr.len());
     }
+
+    #[test]
+    fn test_neo_validate_generated_address() {
+        let signer = NeoSigner::generate().unwrap();
+        assert!(trad_signer::neo::validate_address(&signer.address()));
+    }
+
+    #[test]
+    fn test_neo_validate_rejects_invalid() {
+        assert!(!trad_signer::neo::validate_address(""));
+        assert!(!trad_signer::neo::validate_address("not_a_neo_address"));
+        assert!(!trad_signer::neo::validate_address("A"));
+    }
+}
+
+// ─── Address Validation Tests ────────────────────────────────────────
+
+#[cfg(feature = "ethereum")]
+mod eth_validation {
+    use trad_signer::ethereum::{EthereumSigner, validate_address};
+    use trad_signer::traits::KeyPair;
+
+    #[test]
+    fn test_validate_eip55_checksummed() {
+        let signer = EthereumSigner::generate().unwrap();
+        let addr = signer.address_checksum();
+        assert!(validate_address(&addr), "checksummed address should be valid: {addr}");
+    }
+
+    #[test]
+    fn test_validate_all_lowercase() {
+        assert!(validate_address("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"));
+    }
+
+    #[test]
+    fn test_validate_correct_eip55() {
+        assert!(validate_address("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"));
+    }
+
+    #[test]
+    fn test_validate_wrong_eip55_checksum() {
+        assert!(!validate_address("0x5AAEB6053f3e94c9b9A09f33669435E7Ef1BeAed"));
+    }
+
+    #[test]
+    fn test_validate_too_short() {
+        assert!(!validate_address("0x1234"));
+    }
+
+    #[test]
+    fn test_validate_no_prefix() {
+        assert!(!validate_address("5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"));
+    }
+
+    #[test]
+    fn test_validate_invalid_hex() {
+        assert!(!validate_address("0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"));
+    }
+}
+
+#[cfg(feature = "solana")]
+mod sol_validation {
+    use trad_signer::solana::{SolanaSigner, validate_address};
+    use trad_signer::traits::KeyPair;
+
+    #[test]
+    fn test_validate_generated_address() {
+        let signer = SolanaSigner::generate().unwrap();
+        assert!(validate_address(&signer.address()));
+    }
+
+    #[test]
+    fn test_validate_system_program() {
+        assert!(validate_address("11111111111111111111111111111112"));
+    }
+
+    #[test]
+    fn test_validate_rejects_short() {
+        assert!(!validate_address("abc"));
+    }
+}
+
+#[cfg(feature = "xrp")]
+mod xrp_validation {
+    use trad_signer::xrp::{XrpEcdsaSigner, XrpEddsaSigner, validate_address};
+    use trad_signer::traits::KeyPair;
+
+    #[test]
+    fn test_validate_ecdsa_address() {
+        let signer = XrpEcdsaSigner::generate().unwrap();
+        assert!(validate_address(&signer.address().unwrap()));
+    }
+
+    #[test]
+    fn test_validate_eddsa_address() {
+        let signer = XrpEddsaSigner::generate().unwrap();
+        assert!(validate_address(&signer.address().unwrap()));
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid() {
+        assert!(!validate_address(""));
+        assert!(!validate_address("not_xrp"));
+        assert!(!validate_address("r"));
+    }
+
+    #[test]
+    fn test_validate_rejects_wrong_prefix() {
+        assert!(!validate_address("1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH"));
+    }
 }
