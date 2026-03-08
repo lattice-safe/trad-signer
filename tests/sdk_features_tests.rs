@@ -307,3 +307,177 @@ mod mnemonic_integration {
         assert_eq!(m.word_count(), 21);
     }
 }
+
+// ─── Bitcoin WIF Tests ──────────────────
+
+#[cfg(feature = "bitcoin")]
+mod wif_tests {
+    use trad_signer::bitcoin::BitcoinSigner;
+    use trad_signer::traits::KeyPair;
+
+    #[test]
+    fn test_wif_starts_with_k_or_l() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let wif = signer.to_wif();
+        assert!(wif.starts_with('K') || wif.starts_with('L'), "WIF should start with K or L: {wif}");
+    }
+
+    #[test]
+    fn test_wif_testnet_starts_with_c() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let wif = signer.to_wif_testnet();
+        assert!(wif.starts_with('c'), "testnet WIF should start with 'c': {wif}");
+    }
+
+    #[test]
+    fn test_wif_roundtrip() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let wif = signer.to_wif();
+        let restored = BitcoinSigner::from_wif(&wif).unwrap();
+        // Round-trip: verify the restored key produces the same WIF
+        assert_eq!(signer.to_wif(), restored.to_wif());
+    }
+
+    #[test]
+    fn test_wif_testnet_roundtrip() {
+        let signer = BitcoinSigner::generate().unwrap();
+        let wif = signer.to_wif_testnet();
+        let restored = BitcoinSigner::from_wif(&wif).unwrap();
+        assert_eq!(signer.to_wif(), restored.to_wif());
+    }
+
+    #[test]
+    fn test_wif_invalid_rejected() {
+        assert!(BitcoinSigner::from_wif("notavalidwif").is_err());
+        assert!(BitcoinSigner::from_wif("").is_err());
+    }
+}
+
+// ─── xpub/xprv Fingerprint Tests ────────────────────
+
+#[cfg(feature = "hd_key")]
+mod fingerprint_tests {
+    use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
+
+    #[test]
+    fn test_master_key_has_zero_fingerprint() {
+        let master = ExtendedPrivateKey::from_seed(&[0x42u8; 64]).unwrap();
+        assert_eq!(*master.parent_fingerprint(), [0u8; 4]);
+        assert_eq!(master.child_index(), 0);
+        assert_eq!(master.depth(), 0);
+    }
+
+    #[test]
+    fn test_child_key_has_nonzero_fingerprint() {
+        let master = ExtendedPrivateKey::from_seed(&[0x42u8; 64]).unwrap();
+        let child = master.derive_path(&DerivationPath::ethereum(0)).unwrap();
+        // Depth should be 5 (m/44'/60'/0'/0/0)
+        assert_eq!(child.depth(), 5);
+        // Fingerprint should not be zero (it's derived from parent's pubkey)
+        assert_ne!(*child.parent_fingerprint(), [0u8; 4]);
+    }
+
+    #[test]
+    fn test_xprv_roundtrip_preserves_fingerprint() {
+        let master = ExtendedPrivateKey::from_seed(&[0x42u8; 64]).unwrap();
+        let child = master.derive_path(&DerivationPath::bitcoin(0)).unwrap();
+        let xprv = child.to_xprv();
+        let restored = ExtendedPrivateKey::from_xprv(&xprv).unwrap();
+        assert_eq!(*child.parent_fingerprint(), *restored.parent_fingerprint());
+        assert_eq!(child.child_index(), restored.child_index());
+        assert_eq!(child.depth(), restored.depth());
+    }
+
+    #[test]
+    fn test_different_children_have_same_parent_fingerprint() {
+        let master = ExtendedPrivateKey::from_seed(&[0x42u8; 64]).unwrap();
+        let child0 = master.derive_child(0, false).unwrap();
+        let child1 = master.derive_child(1, false).unwrap();
+        // Same parent → same fingerprint
+        assert_eq!(*child0.parent_fingerprint(), *child1.parent_fingerprint());
+        // But different child indices
+        assert_ne!(child0.child_index(), child1.child_index());
+    }
+}
+
+// ─── Mnemonic → Signer Helper Tests ────────────────────
+
+#[cfg(feature = "mnemonic")]
+mod mnemonic_signer_helpers {
+    use trad_signer::mnemonic::Mnemonic;
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn test_mnemonic_to_ethereum_signer() {
+        let m = Mnemonic::generate(12).unwrap();
+        let signer = m.to_ethereum_signer("", 0).unwrap();
+        let addr = signer.address_checksum();
+        assert!(addr.starts_with("0x") && addr.len() == 42);
+    }
+
+    #[cfg(feature = "bitcoin")]
+    #[test]
+    fn test_mnemonic_to_bitcoin_signer() {
+        let m = Mnemonic::generate(12).unwrap();
+        let signer = m.to_bitcoin_signer("", 0).unwrap();
+        let addr = signer.p2pkh_address();
+        assert!(addr.starts_with('1'));
+    }
+
+    #[cfg(feature = "solana")]
+    #[test]
+    fn test_mnemonic_to_solana_signer() {
+        let m = Mnemonic::generate(12).unwrap();
+        let signer = m.to_solana_signer("", 0).unwrap();
+        let addr = signer.address();
+        assert!(trad_signer::solana::validate_address(&addr));
+    }
+
+    #[cfg(feature = "xrp")]
+    #[test]
+    fn test_mnemonic_to_xrp_signer() {
+        let m = Mnemonic::generate(12).unwrap();
+        let signer = m.to_xrp_signer("", 0).unwrap();
+        let addr = signer.address().unwrap();
+        assert!(addr.starts_with('r'));
+    }
+
+    #[cfg(feature = "ethereum")]
+    #[test]
+    fn test_same_mnemonic_same_signer() {
+        let m = Mnemonic::generate(12).unwrap();
+        let s1 = m.to_ethereum_signer("pass", 0).unwrap();
+        let s2 = m.to_ethereum_signer("pass", 0).unwrap();
+        assert_eq!(s1.address(), s2.address());
+    }
+}
+
+// ─── DerivationPath::parse Tests ──────────────────
+
+#[cfg(feature = "hd_key")]
+mod derivation_path_parse {
+    use trad_signer::hd_key::DerivationPath;
+
+    #[test]
+    fn test_parse_ethereum_path() {
+        let path = DerivationPath::parse("m/44'/60'/0'/0/0").unwrap();
+        assert_eq!(path.steps.len(), 5);
+        assert!(path.steps[0].hardened);
+        assert_eq!(path.steps[0].index, 44);
+        assert!(!path.steps[4].hardened);
+        assert_eq!(path.steps[4].index, 0);
+    }
+
+    #[test]
+    fn test_parse_h_notation() {
+        let path = DerivationPath::parse("m/44h/60h/0h/0/0").unwrap();
+        assert_eq!(path.steps.len(), 5);
+        assert!(path.steps[0].hardened);
+    }
+
+    #[test]
+    fn test_parse_invalid_rejected() {
+        assert!(DerivationPath::parse("").is_err());
+        assert!(DerivationPath::parse("44'/60'").is_err()); // no m/ prefix
+    }
+}

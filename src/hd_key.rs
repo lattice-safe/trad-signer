@@ -33,6 +33,10 @@ pub struct ExtendedPrivateKey {
     chain_code: [u8; 32],
     /// Derivation depth (0 = master).
     depth: u8,
+    /// Parent key fingerprint (first 4 bytes of HASH160(parent_pubkey)).
+    parent_fingerprint: [u8; 4],
+    /// Child index used in derivation (includes hardened bit if applicable).
+    child_index: u32,
 }
 
 impl Drop for ExtendedPrivateKey {
@@ -73,6 +77,8 @@ impl ExtendedPrivateKey {
             key,
             chain_code,
             depth: 0,
+            parent_fingerprint: [0u8; 4],
+            child_index: 0,
         })
     }
 
@@ -146,10 +152,25 @@ impl ExtendedPrivateKey {
 
         let child_key = derive_result?;
 
+        // Compute parent fingerprint: HASH160(parent_pubkey)[..4]
+        let parent_fp = {
+            use sha2::Digest;
+            let sk = k256::SecretKey::from_bytes((&*self.key).into())
+                .map_err(|e| SignerError::InvalidPrivateKey(e.to_string()))?;
+            let pk_bytes = sk.public_key().to_encoded_point(true);
+            let sha = sha2::Sha256::digest(pk_bytes.as_bytes());
+            let ripe = ripemd::Ripemd160::digest(sha);
+            let mut fp = [0u8; 4];
+            fp.copy_from_slice(&ripe[..4]);
+            fp
+        };
+
         Ok(Self {
             key: child_key,
             chain_code: child_chain,
             depth: self.depth.saturating_add(1),
+            parent_fingerprint: parent_fp,
+            child_index: effective_index,
         })
     }
 
@@ -159,6 +180,8 @@ impl ExtendedPrivateKey {
             key: self.key.clone(),
             chain_code: self.chain_code,
             depth: self.depth,
+            parent_fingerprint: self.parent_fingerprint,
+            child_index: self.child_index,
         };
         for step in &path.steps {
             current = current.derive_child(step.index, step.hardened)?;
@@ -188,18 +211,25 @@ impl ExtendedPrivateKey {
         &self.chain_code
     }
 
+    /// Get the parent key fingerprint (4 bytes).
+    pub fn parent_fingerprint(&self) -> &[u8; 4] {
+        &self.parent_fingerprint
+    }
+
+    /// Get the child index used in this key's derivation.
+    pub fn child_index(&self) -> u32 {
+        self.child_index
+    }
+
     /// Serialize as an **xprv** Base58Check string (BIP-32).
     ///
     /// Format: `4 bytes version || 1 byte depth || 4 bytes fingerprint || 4 bytes child index || 32 bytes chain code || 1 byte 0x00 || 32 bytes key`
-    ///
-    /// Note: Fingerprint and child index are zeroed (master key context only).
-    /// For proper child key serialization, use `to_xprv_with_parent()`.
     pub fn to_xprv(&self) -> String {
         let mut data = Vec::with_capacity(78);
         data.extend_from_slice(&[0x04, 0x88, 0xAD, 0xE4]); // xprv version
         data.push(self.depth);
-        data.extend_from_slice(&[0x00; 4]); // parent fingerprint (simplified)
-        data.extend_from_slice(&[0x00; 4]); // child index (simplified)
+        data.extend_from_slice(&self.parent_fingerprint);
+        data.extend_from_slice(&self.child_index.to_be_bytes());
         data.extend_from_slice(&self.chain_code);
         data.push(0x00); // private key prefix
         data.extend_from_slice(&*self.key);
@@ -219,8 +249,8 @@ impl ExtendedPrivateKey {
         let mut data = Vec::with_capacity(78);
         data.extend_from_slice(&[0x04, 0x88, 0xB2, 0x1E]); // xpub version
         data.push(self.depth);
-        data.extend_from_slice(&[0x00; 4]); // parent fingerprint (simplified)
-        data.extend_from_slice(&[0x00; 4]); // child index (simplified)
+        data.extend_from_slice(&self.parent_fingerprint);
+        data.extend_from_slice(&self.child_index.to_be_bytes());
         data.extend_from_slice(&self.chain_code);
         data.extend_from_slice(&pubkey);
         let checksum = {
@@ -256,6 +286,9 @@ impl ExtendedPrivateKey {
             return Err(SignerError::InvalidPrivateKey("not an xprv (wrong version)".into()));
         }
         let depth = data[4];
+        let mut parent_fingerprint = [0u8; 4];
+        parent_fingerprint.copy_from_slice(&data[5..9]);
+        let child_index = u32::from_be_bytes([data[9], data[10], data[11], data[12]]);
         let mut chain_code = [0u8; 32];
         chain_code.copy_from_slice(&data[13..45]);
         // data[45] should be 0x00 (private key prefix)
@@ -267,7 +300,7 @@ impl ExtendedPrivateKey {
         // Validate the key
         k256::SecretKey::from_bytes((&*key).into())
             .map_err(|_| SignerError::InvalidPrivateKey("invalid xprv key".into()))?;
-        Ok(Self { key, chain_code, depth })
+        Ok(Self { key, chain_code, depth, parent_fingerprint, child_index })
     }
 }
 

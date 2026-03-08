@@ -75,6 +75,71 @@ impl BitcoinSigner {
         })
     }
 
+    /// Export the private key in **WIF** (Wallet Import Format).
+    ///
+    /// Uses version byte 0x80 (mainnet) with compression flag.
+    /// Result starts with `K` or `L`.
+    pub fn to_wif(&self) -> String {
+        let mut payload = Vec::with_capacity(34);
+        payload.push(0x80); // mainnet version
+        payload.extend_from_slice(&self.signing_key.to_bytes());
+        payload.push(0x01); // compressed flag
+        let checksum = double_sha256(&payload);
+        payload.extend_from_slice(&checksum[..4]);
+        bs58::encode(payload).into_string()
+    }
+
+    /// Export the private key in **testnet WIF** format.
+    ///
+    /// Uses version byte 0xEF (testnet). Result starts with `c`.
+    pub fn to_wif_testnet(&self) -> String {
+        let mut payload = Vec::with_capacity(34);
+        payload.push(0xEF); // testnet version
+        payload.extend_from_slice(&self.signing_key.to_bytes());
+        payload.push(0x01); // compressed flag
+        let checksum = double_sha256(&payload);
+        payload.extend_from_slice(&checksum[..4]);
+        bs58::encode(payload).into_string()
+    }
+
+    /// Import a private key from **WIF** (Wallet Import Format).
+    ///
+    /// Accepts mainnet (`5`/`K`/`L`) and testnet (`9`/`c`) WIF strings.
+    pub fn from_wif(wif: &str) -> Result<Self, SignerError> {
+        use crate::traits::KeyPair;
+        let decoded = bs58::decode(wif)
+            .into_vec()
+            .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid WIF base58: {e}")))?;
+
+        // Validate length: 37 (uncompressed) or 38 (compressed)
+        if decoded.len() != 37 && decoded.len() != 38 {
+            return Err(SignerError::InvalidPrivateKey(format!(
+                "WIF must be 37 or 38 bytes, got {}",
+                decoded.len()
+            )));
+        }
+
+        // Validate version byte
+        let version = decoded[0];
+        if version != 0x80 && version != 0xEF {
+            return Err(SignerError::InvalidPrivateKey(format!(
+                "invalid WIF version: 0x{version:02x}"
+            )));
+        }
+
+        // Validate checksum
+        let payload_len = decoded.len() - 4;
+        let checksum = double_sha256(&decoded[..payload_len]);
+        if decoded[payload_len..] != checksum[..4] {
+            return Err(SignerError::InvalidPrivateKey("invalid WIF checksum".into()));
+        }
+
+        // Extract key bytes (skip version byte; compression flag handled by length check)
+        let key_bytes = &decoded[1..33];
+
+        Self::from_bytes(key_bytes)
+    }
+
     /// Generate a **P2PKH** address (`1...`) from the compressed public key.
     ///
     /// Formula: Base58Check(0x00 || HASH160(compressed_pubkey))

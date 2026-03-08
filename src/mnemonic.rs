@@ -195,6 +195,74 @@ impl Mnemonic {
     pub fn word_count(&self) -> usize {
         self.words.split_whitespace().count()
     }
+
+    /// Derive an **Ethereum** signer from this mnemonic.
+    ///
+    /// Uses BIP-44 path `m/44'/60'/0'/0/{account_index}`.
+    #[cfg(feature = "ethereum")]
+    pub fn to_ethereum_signer(
+        &self,
+        passphrase: &str,
+        account_index: u32,
+    ) -> Result<crate::ethereum::EthereumSigner, SignerError> {
+        use crate::traits::KeyPair;
+        let seed = self.to_seed(passphrase);
+        let master = crate::hd_key::ExtendedPrivateKey::from_seed(&*seed)?;
+        let child = master.derive_path(&crate::hd_key::DerivationPath::ethereum(account_index))?;
+        crate::ethereum::EthereumSigner::from_bytes(&child.private_key_bytes())
+    }
+
+    /// Derive a **Bitcoin** signer from this mnemonic.
+    ///
+    /// Uses BIP-44 path `m/44'/0'/0'/0/{account_index}`.
+    #[cfg(feature = "bitcoin")]
+    pub fn to_bitcoin_signer(
+        &self,
+        passphrase: &str,
+        account_index: u32,
+    ) -> Result<crate::bitcoin::BitcoinSigner, SignerError> {
+        use crate::traits::KeyPair;
+        let seed = self.to_seed(passphrase);
+        let master = crate::hd_key::ExtendedPrivateKey::from_seed(&*seed)?;
+        let child = master.derive_path(&crate::hd_key::DerivationPath::bitcoin(account_index))?;
+        crate::bitcoin::BitcoinSigner::from_bytes(&child.private_key_bytes())
+    }
+
+    /// Derive a **Solana** signer from this mnemonic.
+    ///
+    /// Uses BIP-44 path `m/44'/501'/{account_index}'/0'`.
+    ///
+    /// **Note**: Solana uses Ed25519, but BIP-32 derives secp256k1 keys.
+    /// This returns the raw 32-byte derived key as the Ed25519 seed, which is
+    /// the convention used by Phantom and other Solana wallets.
+    #[cfg(feature = "solana")]
+    pub fn to_solana_signer(
+        &self,
+        passphrase: &str,
+        account_index: u32,
+    ) -> Result<crate::solana::SolanaSigner, SignerError> {
+        use crate::traits::KeyPair;
+        let seed = self.to_seed(passphrase);
+        let master = crate::hd_key::ExtendedPrivateKey::from_seed(&*seed)?;
+        let child = master.derive_path(&crate::hd_key::DerivationPath::solana(account_index))?;
+        crate::solana::SolanaSigner::from_bytes(&child.private_key_bytes())
+    }
+
+    /// Derive an **XRP** ECDSA signer from this mnemonic.
+    ///
+    /// Uses BIP-44 path `m/44'/144'/0'/0/{account_index}`.
+    #[cfg(feature = "xrp")]
+    pub fn to_xrp_signer(
+        &self,
+        passphrase: &str,
+        account_index: u32,
+    ) -> Result<crate::xrp::XrpEcdsaSigner, SignerError> {
+        use crate::traits::KeyPair;
+        let seed = self.to_seed(passphrase);
+        let master = crate::hd_key::ExtendedPrivateKey::from_seed(&*seed)?;
+        let child = master.derive_path(&crate::hd_key::DerivationPath::xrp(account_index))?;
+        crate::xrp::XrpEcdsaSigner::from_bytes(&child.private_key_bytes())
+    }
 }
 
 #[cfg(test)]

@@ -35,7 +35,7 @@ xrp = [
 ]
 neo = ["dep:p256", "dep:sha2", "dep:ripemd"]
 bls = ["dep:blst"]
-hd_key = ["dep:k256", "dep:sha2", "dep:hmac"]
+hd_key = ["dep:k256", "dep:sha2", "dep:hmac", "dep:ripemd"]
 mnemonic = ["dep:sha2", "dep:hmac", "dep:pbkdf2", "hd_key"]
 
 [dependencies]
