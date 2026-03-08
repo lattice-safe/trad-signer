@@ -43,6 +43,16 @@ pub struct SchnorrSigner {
     signing_key: SchnorrSigningKey,
 }
 
+impl SchnorrSigner {
+    /// Generate a **P2TR** (Taproot) address (`bc1p...`) from the x-only public key.
+    ///
+    /// Formula: Bech32m("bc", 1, x_only_pubkey_32_bytes)
+    pub fn p2tr_address(&self) -> Result<String, SignerError> {
+        let xonly = self.signing_key.verifying_key().to_bytes();
+        super::bech32_encode("bc", 1, &xonly)
+    }
+}
+
 impl Drop for SchnorrSigner {
     fn drop(&mut self) {
         // k256 SchnorrSigningKey handles its own zeroization

@@ -65,6 +65,25 @@ pub fn account_id(pubkey_bytes: &[u8]) -> [u8; 20] {
     out
 }
 
+/// XRP Base58 alphabet (differs from Bitcoin's alphabet).
+fn xrp_alphabet() -> Result<bs58::Alphabet, SignerError> {
+    bs58::Alphabet::new(b"rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz")
+        .map_err(|e| SignerError::InvalidPublicKey(format!("XRP alphabet: {e}")))
+}
+
+/// Generate an XRP `r...` address from a 20-byte account ID.
+///
+/// Uses XRP's custom Base58Check with version byte 0x00.
+pub fn xrp_address(account_id: &[u8; 20]) -> Result<String, SignerError> {
+    let mut payload = vec![0x00u8]; // version byte
+    payload.extend_from_slice(account_id);
+    // XRP uses double-SHA256 for checksum (same as Bitcoin)
+    let hash1 = Sha256::digest(&payload);
+    let hash2 = Sha256::digest(hash1);
+    payload.extend_from_slice(&hash2[..4]);
+    Ok(bs58::encode(payload).with_alphabet(&xrp_alphabet()?).into_string())
+}
+
 // ─── ECDSA (secp256k1) ──────────────────────────────────────────────────────
 
 /// XRP ECDSA signer (secp256k1 + SHA-512 half).
@@ -82,6 +101,11 @@ impl XrpEcdsaSigner {
     /// Derive the XRP account ID from this signer's public key.
     pub fn account_id(&self) -> [u8; 20] {
         account_id(&self.public_key_bytes_inner())
+    }
+
+    /// Return the XRP `r...` address string.
+    pub fn address(&self) -> Result<String, SignerError> {
+        xrp_address(&self.account_id())
     }
 
     fn public_key_bytes_inner(&self) -> Vec<u8> {
@@ -224,6 +248,11 @@ impl XrpEddsaSigner {
         prefixed.push(0xED);
         prefixed.extend_from_slice(vk.as_bytes());
         account_id(&prefixed)
+    }
+
+    /// Return the XRP `r...` address string.
+    pub fn address(&self) -> Result<String, SignerError> {
+        xrp_address(&self.account_id())
     }
 }
 

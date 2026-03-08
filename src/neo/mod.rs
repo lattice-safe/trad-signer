@@ -40,6 +40,41 @@ pub struct NeoSigner {
     signing_key: SigningKey,
 }
 
+impl NeoSigner {
+    /// Compute the NEO script hash from the compressed public key.
+    ///
+    /// NEO N3 standard: `HASH160(0x21 || compressed_pubkey || 0xAC)`
+    /// where `0x21` = PUSH33 and `0xAC` = CHECKSIG.
+    pub fn script_hash(&self) -> [u8; 20] {
+        let pubkey = self.signing_key.verifying_key().to_encoded_point(true);
+        let mut script = Vec::with_capacity(35);
+        script.push(0x21); // PUSH33 opcode
+        script.extend_from_slice(pubkey.as_bytes());
+        script.push(0xAC); // CHECKSIG opcode
+
+        let sha = Sha256::digest(&script);
+        let ripe = ripemd::Ripemd160::digest(sha);
+        let mut out = [0u8; 20];
+        out.copy_from_slice(&ripe);
+        out
+    }
+
+    /// Return the NEO `A...` address string.
+    ///
+    /// Formula: Base58Check(0x17 || script_hash)
+    pub fn address(&self) -> String {
+        let hash = self.script_hash();
+        let mut payload = vec![0x17u8]; // NEO version byte
+        payload.extend_from_slice(&hash);
+        let checksum = {
+            let h1 = Sha256::digest(&payload);
+            Sha256::digest(h1)
+        };
+        payload.extend_from_slice(&checksum[..4]);
+        bs58::encode(payload).into_string()
+    }
+}
+
 impl Drop for NeoSigner {
     fn drop(&mut self) {
         // p256::SigningKey implements ZeroizeOnDrop internally

@@ -131,6 +131,68 @@ impl EthereumSigner {
         let digest = eip191_hash(message);
         self.sign_digest(&digest)
     }
+
+    /// Return the EIP-55 checksummed hex address string (e.g., `0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B`).
+    pub fn address_checksum(&self) -> String {
+        eip55_checksum(&self.address())
+    }
+}
+
+/// Return an EIP-55 checksummed hex address string from 20 raw bytes.
+///
+/// The EIP-55 spec: hex-encode the address, then uppercase each hex digit
+/// whose corresponding nibble in the keccak256 of the lowercase hex is >= 8.
+pub fn eip55_checksum(address: &[u8; 20]) -> String {
+    let hex_lower: String = address.iter().map(|b| format!("{b:02x}")).collect();
+    let hash = Keccak256::digest(hex_lower.as_bytes());
+    let mut out = String::with_capacity(42);
+    out.push_str("0x");
+    for (i, c) in hex_lower.chars().enumerate() {
+        let hash_nibble = if i % 2 == 0 {
+            (hash[i / 2] >> 4) & 0x0f
+        } else {
+            hash[i / 2] & 0x0f
+        };
+        if hash_nibble >= 8 {
+            out.extend(c.to_uppercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// **ecrecover**: Recover the signer's Ethereum address from a message and signature.
+///
+/// Internally keccak256-hashes the message and performs ECDSA recovery.
+/// Returns the 20-byte address of the signer.
+pub fn ecrecover(message: &[u8], signature: &EthereumSignature) -> Result<[u8; 20], SignerError> {
+    let digest = Keccak256::digest(message);
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&digest);
+    ecrecover_digest(&hash, signature)
+}
+
+/// **ecrecover** from a pre-hashed 32-byte digest, useful for EIP-712 / EIP-191.
+pub fn ecrecover_digest(digest: &[u8; 32], signature: &EthereumSignature) -> Result<[u8; 20], SignerError> {
+    let rec_id = RecoveryId::try_from(signature.v.wrapping_sub(27))
+        .map_err(|_| SignerError::InvalidSignature("invalid recovery id (v must be 27 or 28)".into()))?;
+
+    let mut sig_bytes = [0u8; 64];
+    sig_bytes[..32].copy_from_slice(&signature.r);
+    sig_bytes[32..].copy_from_slice(&signature.s);
+    let sig = K256Signature::from_bytes((&sig_bytes).into())
+        .map_err(|e| SignerError::InvalidSignature(e.to_string()))?;
+
+    let recovered_key = VerifyingKey::recover_from_prehash(digest, &sig, rec_id)
+        .map_err(|e| SignerError::InvalidSignature(e.to_string()))?;
+
+    let point = recovered_key.to_encoded_point(false);
+    let pubkey_bytes = &point.as_bytes()[1..];
+    let hash = Keccak256::digest(pubkey_bytes);
+    let mut addr = [0u8; 20];
+    addr.copy_from_slice(&hash[12..]);
+    Ok(addr)
 }
 
 /// Compute the EIP-191 personal message hash:

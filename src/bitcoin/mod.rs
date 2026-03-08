@@ -74,6 +74,55 @@ impl BitcoinSigner {
             der_bytes: der.as_bytes().to_vec(),
         })
     }
+
+    /// Generate a **P2PKH** address (`1...`) from the compressed public key.
+    ///
+    /// Formula: Base58Check(0x00 || HASH160(compressed_pubkey))
+    pub fn p2pkh_address(&self) -> String {
+        let pubkey = self.signing_key.verifying_key().to_sec1_bytes();
+        let h160 = hash160(&pubkey);
+        base58check_encode(0x00, &h160)
+    }
+
+    /// Generate a **P2WPKH** (SegWit) address (`bc1...`) from the compressed public key.
+    ///
+    /// Formula: Bech32("bc", 0, HASH160(compressed_pubkey))
+    pub fn p2wpkh_address(&self) -> Result<String, SignerError> {
+        let pubkey = self.signing_key.verifying_key().to_sec1_bytes();
+        let h160 = hash160(&pubkey);
+        bech32_encode("bc", 0, &h160)
+    }
+
+}
+
+/// HASH160: RIPEMD160(SHA256(data)) — the standard Bitcoin hash function.
+pub fn hash160(data: &[u8]) -> [u8; 20] {
+    use sha2::Digest as _;
+    let sha = Sha256::digest(data);
+    let ripe = ripemd::Ripemd160::digest(sha);
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&ripe);
+    out
+}
+
+/// Base58Check encode: `version_byte || payload || checksum[0..4]`.
+fn base58check_encode(version: u8, payload: &[u8]) -> String {
+    let mut prefixed = vec![version];
+    prefixed.extend_from_slice(payload);
+    let checksum = double_sha256(&prefixed);
+    prefixed.extend_from_slice(&checksum[..4]);
+    bs58::encode(prefixed).into_string()
+}
+
+/// Bech32/Bech32m encode for SegWit/Taproot addresses.
+pub(crate) fn bech32_encode(hrp: &str, witness_version: u8, program: &[u8]) -> Result<String, SignerError> {
+    use bech32::Hrp;
+    let hrp = Hrp::parse(hrp)
+        .map_err(|e| SignerError::InvalidPublicKey(format!("bech32 hrp: {e}")))?;
+    let version = bech32::Fe32::try_from(witness_version)
+        .map_err(|e| SignerError::InvalidPublicKey(format!("witness version: {e}")))?;
+    bech32::segwit::encode(hrp, version, program)
+        .map_err(|e| SignerError::InvalidPublicKey(format!("bech32 encode: {e}")))
 }
 
 impl traits::Signer for BitcoinSigner {

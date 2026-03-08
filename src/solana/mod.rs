@@ -42,6 +42,15 @@ pub struct SolanaSigner {
     signing_key: ed25519_dalek::SigningKey,
 }
 
+impl SolanaSigner {
+    /// Return the Solana address as a Base58-encoded string.
+    ///
+    /// Solana addresses are simply the Base58 encoding of the 32-byte Ed25519 public key.
+    pub fn address(&self) -> String {
+        bs58::encode(self.signing_key.verifying_key().as_bytes()).into_string()
+    }
+}
+
 impl Drop for SolanaSigner {
     fn drop(&mut self) {
         // ed25519_dalek::SigningKey handles its own zeroization
