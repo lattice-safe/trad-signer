@@ -7,8 +7,11 @@
 pub mod abi;
 pub mod eips;
 pub mod keystore;
+pub mod proxy;
 pub mod rlp;
+pub mod safe;
 pub mod siwe;
+pub mod smart_wallet;
 pub mod transaction;
 
 /// BLS12-381 for Ethereum Proof-of-Stake (Beacon Chain).

@@ -22,7 +22,7 @@
 
 ```toml
 [dependencies]
-chains-sdk = "0.7"
+chains-sdk = "0.8"
 ```
 
 ---
@@ -51,6 +51,104 @@ let sig = signer.sign_with_chain_id(b"tx data", 137)?;  // Polygon
 use chains_sdk::ethereum::ecrecover;
 let recovered = ecrecover(b"hello world", &sig)?;
 assert_eq!(recovered, signer.address());
+```
+
+---
+
+## Gnosis Safe Multisig
+
+```rust
+use chains_sdk::ethereum::safe::{SafeTransaction, Operation, safe_domain_separator, encode_signatures};
+use chains_sdk::ethereum::EthereumSigner;
+use chains_sdk::traits::KeyPair;
+
+let signer = EthereumSigner::generate()?;
+let domain = safe_domain_separator(1, &[0xAA; 20]);
+
+let tx = SafeTransaction {
+    to: [0xBB; 20],
+    value: [0u8; 32],
+    data: vec![],
+    operation: Operation::Call,
+    safe_tx_gas: [0u8; 32],
+    base_gas: [0u8; 32],
+    gas_price: [0u8; 32],
+    gas_token: [0u8; 20],
+    refund_receiver: [0u8; 20],
+    nonce: [0u8; 32],
+};
+
+// Sign the Safe transaction (EIP-712)
+let sig = tx.sign(&signer, &domain)?;
+
+// Build execTransaction calldata
+let calldata = tx.encode_exec_transaction(&[sig]);
+
+// Owner management
+use chains_sdk::ethereum::safe;
+let add = safe::encode_add_owner([0xCC; 20], 2);
+let remove = safe::encode_remove_owner(safe::SENTINEL_OWNERS, [0xCC; 20], 1);
+```
+
+---
+
+## UUPS / Proxy Contracts (EIP-1967)
+
+```rust
+use chains_sdk::ethereum::proxy;
+
+// UUPS upgrade
+let calldata = proxy::encode_upgrade_to([0xBB; 20]);
+let calldata = proxy::encode_upgrade_to_and_call([0xBB; 20], &init_data);
+
+// EIP-1967 storage slots
+assert_eq!(
+    hex::encode(proxy::IMPLEMENTATION_SLOT),
+    "360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+);
+
+// Multicall3 batch
+let calls = vec![
+    proxy::Multicall3Call { target: [0xAA; 20], allow_failure: false, call_data: vec![0x01] },
+    proxy::Multicall3Call { target: [0xBB; 20], allow_failure: true, call_data: vec![0x02] },
+];
+let batch = proxy::encode_multicall(&calls);
+```
+
+---
+
+## Smart Wallet / Account Abstraction (EIP-4337 v0.7)
+
+```rust
+use chains_sdk::ethereum::smart_wallet::{PackedUserOperation, encode_execute, encode_execute_batch, ExecuteCall};
+
+// Smart wallet execute
+let calldata = encode_execute([0xBB; 20], 0, &transfer_data);
+
+// Batch execution
+let calls = vec![
+    ExecuteCall { target: [0xAA; 20], value: 0, data: vec![0x01] },
+    ExecuteCall { target: [0xBB; 20], value: 100, data: vec![0x02] },
+];
+let batch = encode_execute_batch(&calls);
+
+// EIP-4337 v0.7 PackedUserOperation
+let op = PackedUserOperation {
+    sender: [0xAA; 20],
+    nonce: [0u8; 32],
+    init_code: vec![],
+    call_data: calldata,
+    account_gas_limits: PackedUserOperation::pack_account_gas_limits(100_000, 200_000),
+    pre_verification_gas: [0u8; 32],
+    gas_fees: PackedUserOperation::pack_gas_fees(1_000_000_000, 2_000_000_000),
+    paymaster_and_data: vec![],
+    signature: vec![],
+};
+let hash = op.hash(&entry_point, 1);
+
+// ERC-1271 contract signature validation
+use chains_sdk::ethereum::smart_wallet::{encode_is_valid_signature, is_valid_signature_magic};
+let calldata = encode_is_valid_signature(&hash, &sig_bytes);
 ```
 
 ---
@@ -374,7 +472,7 @@ All modules are enabled by default. Disable unused ones to reduce compile time:
 
 ```toml
 [dependencies]
-chains-sdk = { version = "0.7", default-features = false, features = ["ethereum", "frost"] }
+chains-sdk = { version = "0.8", default-features = false, features = ["ethereum", "frost"] }
 ```
 
 | Feature | Description |
@@ -415,7 +513,7 @@ Run with `cargo bench --all-features`. Covers all chains + threshold signing:
 - Constant-time comparisons via `subtle::ConstantTimeEq`
 - FROST nonces are single-use `Zeroizing<Scalar>` with drop guards
 - `cargo audit`: **0 vulnerabilities** across 175+ dependencies
-- **887+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, and FIPS 186-4 vectors
+- **1,100+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, EIP-4337, and FIPS 186-4 vectors
 
 ### Enclave / Confidential Computing
 
@@ -483,7 +581,7 @@ src/
 │   ├── descriptor.rs  # BIP-380-386 output descriptors
 │   ├── helpers.rs     # OP_RETURN, RBF, CPFP, Ordinals
 │   └── scripts.rs     # HTLC, CLTV/CSV timelock, coin selection
-├── ethereum/          # EIP-191/712/155/2612/3009/4494, ecrecover, multicall
+├── ethereum/          # EIP-191/712/155/2612/3009/4337/4494, ecrecover, Safe, proxy, smart wallet
 ├── solana/
 │   ├── transaction.rs # SPL Token, System, Compute Budget
 │   └── programs.rs    # ATA, Memo v2, Stake, Durable Nonce

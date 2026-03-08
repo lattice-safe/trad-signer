@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.8.1] — 2026-03-09
+
+### Added
+- **`ethereum::safe`** — Gnosis Safe multisig support:
+  - `SafeTransaction` with EIP-712 typed signing (`safeTxHash`)
+  - `encode_exec_transaction()` calldata encoding
+  - `encode_signatures()` / `decode_signatures()` for multi-sig packing
+  - Management: `addOwnerWithThreshold`, `removeOwner`, `changeThreshold`, `swapOwner`, `enableModule`, `disableModule`, `setGuard`
+  - Query: `getOwners()`, `getThreshold()`, `nonce()`, `getTransactionHash()`
+- **`ethereum::proxy`** — UUPS / Transparent / Beacon proxy support:
+  - EIP-1967 storage slot constants (`IMPLEMENTATION_SLOT`, `ADMIN_SLOT`, `BEACON_SLOT`)
+  - `eip1967_slot()` dynamic computation
+  - UUPS: `upgradeTo`, `upgradeToAndCall`, `proxiableUUID`
+  - Transparent: `changeAdmin`, `admin`
+  - Multicall3: `aggregate3` encoding with `Multicall3Call`, legacy `aggregate` support
+- **`ethereum::smart_wallet`** — EIP-4337 v0.7 Account Abstraction:
+  - `PackedUserOperation` (v0.7 packed format) with `pack()`, `hash()`, `sign()`
+  - Gas packing: `pack_account_gas_limits()`, `pack_gas_fees()` and unpacking
+  - `encode_handle_ops()` for EntryPoint v0.7
+  - Paymaster: `encode_paymaster_data()` / `decode_paymaster_data()`
+  - Smart wallet: `encode_execute()`, `encode_execute_batch()`
+  - ERC-1271: `encode_is_valid_signature()`, `is_valid_signature_magic()`
+  - Account factory: `encode_create_account()`, `encode_get_address()`
+  - Nonce: `encode_get_nonce()`
+
+### Changed
+- Test count: 1,006 → 1,119 (110 new tests across 3 modules)
+- README updated with Safe, Proxy, and Smart Wallet examples
+
 ## [0.8.0] — 2026-03-09
 
 ### ⚠ Breaking Changes
