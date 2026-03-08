@@ -61,11 +61,7 @@ impl SchnorrSigner {
     }
 }
 
-impl Drop for SchnorrSigner {
-    fn drop(&mut self) {
-        // k256 SchnorrSigningKey handles its own zeroization
-    }
-}
+// k256 SchnorrSigningKey handles its own zeroization — no explicit Drop needed.
 
 impl traits::Signer for SchnorrSigner {
     type Signature = SchnorrSignature;
@@ -78,9 +74,13 @@ impl traits::Signer for SchnorrSigner {
         Ok(SchnorrSignature { bytes })
     }
 
+    /// Sign a pre-hashed digest.
+    ///
+    /// **Note:** BIP-340 Schnorr signing applies its own internal tagged hashing,
+    /// so this is equivalent to `sign()`. If you pass a pre-hashed digest, it
+    /// will be tagged-hashed *again* internally. This matches the BIP-340 spec
+    /// where the message (not its hash) is the signing input.
     fn sign_prehashed(&self, digest: &[u8]) -> Result<SchnorrSignature, SignerError> {
-        // BIP-340 signing operates on raw messages with internal tagged hashing.
-        // sign_prehashed is equivalent to sign for Schnorr (the message IS the input).
         self.sign(digest)
     }
 

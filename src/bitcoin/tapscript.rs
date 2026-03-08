@@ -4,10 +4,11 @@
 //! Schnorr signatures instead of legacy ECDSA.
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::bitcoin::tapscript::{Script, Opcode};
 //!
 //! // Simple "check signature" script
+//! let pubkey = [0xAA_u8; 32];
 //! let script = Script::new()
 //!     .push_key(&pubkey)
 //!     .push_opcode(Opcode::OP_CHECKSIG);
@@ -299,6 +300,12 @@ impl SighashType {
             0x83 => Some(SighashType::SingleAnyoneCanPay),
             _ => None,
         }
+    }
+
+    /// Convert to the byte representation.
+    #[must_use]
+    pub fn to_byte(self) -> u8 {
+        self as u8
     }
 }
 

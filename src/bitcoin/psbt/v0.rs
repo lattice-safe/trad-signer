@@ -232,6 +232,11 @@ impl Psbt {
     }
 
     /// Deserialize a PSBT from binary format.
+    ///
+    /// Parses the unsigned transaction from the global map (key `0x00`) to
+    /// determine the exact number of input and output maps, then reads
+    /// that many maps in order. Falls back to heuristic classification
+    /// if the unsigned transaction is missing or invalid.
     pub fn deserialize(data: &[u8]) -> Result<Self, SignerError> {
         if data.len() < 5 {
             return Err(SignerError::ParseError("PSBT too short".into()));
@@ -249,33 +254,40 @@ impl Psbt {
         // Parse global map
         psbt.global = parse_kv_map(data, &mut offset)?;
 
-        // Determine number of inputs/outputs from the unsigned tx
-        // For simplicity, we parse the remaining maps as inputs then outputs
-        // In a full implementation, we'd parse the tx to determine counts
-        while offset < data.len() {
-            let map = parse_kv_map(data, &mut offset)?;
-            if !map.is_empty() {
-                // Try to determine if this is an input or output map
-                // Heuristic: input maps have input key types, output maps have output key types
-                let has_input_keys = map.keys().any(|k| {
-                    matches!(
-                        k.first(),
-                        Some(&0x00)
-                            | Some(&0x01)
-                            | Some(&0x02)
-                            | Some(&0x03)
-                            | Some(&0x06)
-                            | Some(&0x07)
-                            | Some(&0x08)
-                            | Some(&0x13)
-                            | Some(&0x14)
-                            | Some(&0x17)
-                    )
-                });
-                if has_input_keys {
-                    psbt.inputs.push(map);
-                } else {
-                    psbt.outputs.push(map);
+        // Try to extract input/output counts from the unsigned transaction (key 0x00)
+        let counts = psbt.global.get(&vec![0x00]).and_then(|raw_tx| {
+            extract_tx_io_counts(raw_tx)
+        });
+
+        if let Some((num_inputs, num_outputs)) = counts {
+            // Parse exactly num_inputs input maps, then num_outputs output maps
+            for _ in 0..num_inputs {
+                if offset >= data.len() { break; }
+                psbt.inputs.push(parse_kv_map(data, &mut offset)?);
+            }
+            for _ in 0..num_outputs {
+                if offset >= data.len() { break; }
+                psbt.outputs.push(parse_kv_map(data, &mut offset)?);
+            }
+        } else {
+            // Fallback: heuristic classification
+            while offset < data.len() {
+                let map = parse_kv_map(data, &mut offset)?;
+                if !map.is_empty() {
+                    let has_input_keys = map.keys().any(|k| {
+                        matches!(
+                            k.first(),
+                            Some(&0x00) | Some(&0x01) | Some(&0x02)
+                                | Some(&0x03) | Some(&0x06) | Some(&0x07)
+                                | Some(&0x08) | Some(&0x13) | Some(&0x14)
+                                | Some(&0x17)
+                        )
+                    });
+                    if has_input_keys {
+                        psbt.inputs.push(map);
+                    } else {
+                        psbt.outputs.push(map);
+                    }
                 }
             }
         }
@@ -337,6 +349,39 @@ fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec
     }
 }
 
+
+/// Extract input and output counts from a raw unsigned transaction.
+///
+/// Parses just enough of the transaction to read the varint counts.
+/// Returns `None` if the data is too short or malformed.
+fn extract_tx_io_counts(raw_tx: &[u8]) -> Option<(usize, usize)> {
+    if raw_tx.len() < 10 {
+        return None; // Too short for any valid tx
+    }
+    // Skip version (4 bytes)
+    let mut offset = 4;
+    // Read input count
+    let num_inputs = encoding::read_compact_size(raw_tx, &mut offset).ok()? as usize;
+    // Skip all inputs: each has outpoint(36) + varint(script_len) + script + sequence(4)
+    for _ in 0..num_inputs {
+        // outpoint (32 txid + 4 vout)
+        if offset + 36 > raw_tx.len() { return None; }
+        offset += 36;
+        // scriptSig length + data
+        let script_len = encoding::read_compact_size(raw_tx, &mut offset).ok()? as usize;
+        if offset + script_len + 4 > raw_tx.len() { return None; }
+        offset += script_len;
+        // sequence
+        offset += 4;
+    }
+    // Read output count
+    let num_outputs = encoding::read_compact_size(raw_tx, &mut offset).ok()? as usize;
+    // Sanity check
+    if num_inputs > 10_000 || num_outputs > 10_000 {
+        return None;
+    }
+    Some((num_inputs, num_outputs))
+}
 
 // ─── Tests ──────────────────────────────────────────────────────────
 

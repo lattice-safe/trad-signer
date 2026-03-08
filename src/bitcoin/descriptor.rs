@@ -4,12 +4,15 @@
 //! legacy (pkh), SegWit (wpkh, wsh), and Taproot (tr) formats.
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::bitcoin::descriptor::{Descriptor, DescriptorKey};
 //!
-//! let key = DescriptorKey::from_hex("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")?;
-//! let desc = Descriptor::wpkh(key);
-//! println!("Address: {}", desc.address("bc")?);
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let key = DescriptorKey::from_hex("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")?;
+//!     let desc = Descriptor::wpkh(key);
+//!     println!("Address: {}", desc.address("bc")?);
+//!     Ok(())
+//! }
 //! ```
 
 use crate::crypto;

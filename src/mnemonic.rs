@@ -4,14 +4,17 @@
 //! seeds via PBKDF2-SHA512, and integrates with the BIP-32 HD key module.
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::mnemonic::Mnemonic;
 //! use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
 //!
-//! let mnemonic = Mnemonic::generate(12)?; // 12-word phrase
-//! let seed = mnemonic.to_seed("optional passphrase");
-//! let master = ExtendedPrivateKey::from_seed(&seed)?;
-//! let eth_key = master.derive_path(&DerivationPath::ethereum(0))?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mnemonic = Mnemonic::generate(12)?; // 12-word phrase
+//!     let seed = mnemonic.to_seed("optional passphrase");
+//!     let master = ExtendedPrivateKey::from_seed(&*seed)?;
+//!     let eth_key = master.derive_path(&DerivationPath::ethereum(0))?;
+//!     Ok(())
+//! }
 //! ```
 
 use crate::error::SignerError;

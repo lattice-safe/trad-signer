@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let sig = signer.sign(b"hello world")?;
         let verifier = BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes())?;
         println!("[BTC]  Pubkey:   {} (compressed {}B)", hex::encode(&signer.public_key_bytes()[..8]), signer.public_key_bytes().len());
-        println!("[BTC]  DER sig:  {}... ({}B), valid={}", hex::encode(&sig.der_bytes[..8]), sig.der_bytes.len(), verifier.verify(b"hello world", &sig)?);
+        println!("[BTC]  DER sig:  {}... ({}B), valid={}", hex::encode(&sig.der_bytes()[..8]), sig.der_bytes().len(), verifier.verify(b"hello world", &sig)?);
     }
 
     // ─── Bitcoin Schnorr ─────────────────────────────────────────────

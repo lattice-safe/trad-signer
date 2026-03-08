@@ -5,16 +5,19 @@
 //! `m/83696968'/...` and produces deterministic entropy via HMAC-SHA512.
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::hd_key::ExtendedPrivateKey;
 //! use trad_signer::bip85;
 //!
-//! let seed = [0xab_u8; 64];
-//! let master = ExtendedPrivateKey::from_seed(&seed)?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let seed = [0xab_u8; 64];
+//!     let master = ExtendedPrivateKey::from_seed(&seed)?;
 //!
-//! // Derive a 12-word BIP-39 child mnemonic
-//! let child_mnemonic = bip85::derive_bip39(&master, 0, 12, 0)?;
-//! println!("Child mnemonic: {}", child_mnemonic);
+//!     // Derive a 12-word BIP-39 child mnemonic
+//!     let child_mnemonic = bip85::derive_bip39(&master, 0, 12, 0)?;
+//!     println!("Child mnemonic: {}", child_mnemonic);
+//!     Ok(())
+//! }
 //! ```
 
 use crate::crypto;

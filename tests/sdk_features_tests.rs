@@ -70,7 +70,7 @@ mod xpub_xprv {
         let seed = [0xABu8; 64];
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
         let xprv = master.to_xprv();
-        assert!(xprv.starts_with("xprv"), "xprv should start with 'xprv': {xprv}");
+        assert!(xprv.starts_with("xprv"), "xprv should start with 'xprv': {}", &*xprv);
     }
 
     #[test]
@@ -319,14 +319,14 @@ mod wif_tests {
     fn test_wif_starts_with_k_or_l() {
         let signer = BitcoinSigner::generate().unwrap();
         let wif = signer.to_wif();
-        assert!(wif.starts_with('K') || wif.starts_with('L'), "WIF should start with K or L: {wif}");
+        assert!(wif.starts_with('K') || wif.starts_with('L'), "WIF should start with K or L: {}", &*wif);
     }
 
     #[test]
     fn test_wif_testnet_starts_with_c() {
         let signer = BitcoinSigner::generate().unwrap();
         let wif = signer.to_wif_testnet();
-        assert!(wif.starts_with('c'), "testnet WIF should start with 'c': {wif}");
+        assert!(wif.starts_with('c'), "testnet WIF should start with 'c': {}", &*wif);
     }
 
     #[test]

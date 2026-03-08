@@ -21,24 +21,27 @@
 //!    a standard Schnorr signature `(R, s)`.
 //!
 //! # Example
-//! ```ignore
-//! use trad_signer::frost::{keygen, signing};
+//! ```no_run
+//! use trad_signer::threshold::frost::{keygen, signing};
 //!
-//! // Dealer generates 2-of-3 key shares
-//! let secret = [0x42u8; 32];
-//! let kgen = keygen::trusted_dealer_keygen(&secret, 2, 3)?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Dealer generates 2-of-3 key shares
+//!     let secret = [0x42u8; 32];
+//!     let kgen = keygen::trusted_dealer_keygen(&secret, 2, 3)?;
 //!
-//! // Participants 1 and 3 sign a message
-//! let msg = b"Hello FROST";
-//! let nonce1 = signing::commit(&kgen.key_packages[0])?;
-//! let nonce3 = signing::commit(&kgen.key_packages[2])?;
+//!     // Participants 1 and 3 sign a message
+//!     let msg = b"Hello FROST";
+//!     let nonce1 = signing::commit(&kgen.key_packages[0])?;
+//!     let nonce3 = signing::commit(&kgen.key_packages[2])?;
 //!
-//! let commitments = vec![nonce1.commitments.clone(), nonce3.commitments.clone()];
-//! let share1 = signing::sign(&kgen.key_packages[0], nonce1, &commitments, msg)?;
-//! let share3 = signing::sign(&kgen.key_packages[2], nonce3, &commitments, msg)?;
+//!     let commitments = vec![nonce1.commitments.clone(), nonce3.commitments.clone()];
+//!     let share1 = signing::sign(&kgen.key_packages[0], nonce1, &commitments, msg)?;
+//!     let share3 = signing::sign(&kgen.key_packages[2], nonce3, &commitments, msg)?;
 //!
-//! let sig = signing::aggregate(&commitments, &[share1, share3], &kgen.group_public_key, msg)?;
-//! assert!(signing::verify(&sig, &kgen.group_public_key, msg)?);
+//!     let sig = signing::aggregate(&commitments, &[share1, share3], &kgen.group_public_key, msg)?;
+//!     assert!(signing::verify(&sig, &kgen.group_public_key, msg)?);
+//!     Ok(())
+//! }
 //! ```
 
 pub mod keygen;

@@ -28,7 +28,7 @@ mod cross_chain {
 
         // Signatures must differ (different hash functions)
         let eth_bytes = eth_sig.to_bytes();
-        assert_ne!(&eth_bytes[..64], &btc_sig.der_bytes[..64.min(btc_sig.der_bytes.len())]);
+        assert_ne!(&eth_bytes[..64], &btc_sig.der_bytes()[..64.min(btc_sig.der_bytes().len())]);
     }
 
     /// Same private key bytes must produce the same public key on ETH and BTC
@@ -258,7 +258,7 @@ mod bip85_workflow {
             .unwrap();
         let btc_signer = BitcoinSigner::from_bytes(&btc_key.private_key_bytes()).unwrap();
         let sig = btc_signer.sign(b"BIP-85 derived signing").unwrap();
-        assert!(!sig.der_bytes.is_empty());
+        assert!(!sig.der_bytes().is_empty());
 
         // Deterministic: same master → same child → same address
         let child_phrase_2 = bip85::derive_bip39(&master, 0, 12, 0).unwrap();

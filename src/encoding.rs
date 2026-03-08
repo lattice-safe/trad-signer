@@ -124,7 +124,8 @@ pub fn base58check_decode(s: &str) -> Result<(u8, Vec<u8>), SignerError> {
     }
     let payload_end = decoded.len() - 4;
     let checksum = crypto::double_sha256(&decoded[..payload_end]);
-    if checksum[..4] != decoded[payload_end..] {
+    use subtle::ConstantTimeEq;
+    if checksum[..4].ct_eq(&decoded[payload_end..]).unwrap_u8() != 1 {
         return Err(SignerError::EncodingError(
             "base58check: invalid checksum".into(),
         ));

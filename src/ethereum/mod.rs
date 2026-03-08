@@ -321,12 +321,15 @@ pub fn eip191_hash(message: &[u8]) -> [u8; 32] {
 ///
 /// Use [`Eip712Domain::separator`] to compute the 32-byte domain separator hash.
 ///
-/// ```ignore
+/// ```no_run
+/// use trad_signer::ethereum::Eip712Domain;
+///
+/// let contract_addr = [0xCC_u8; 20];
 /// let domain = Eip712Domain {
 ///     name: "MyDapp",
 ///     version: "1",
 ///     chain_id: 1,
-///     verifying_contract: &hex!("CcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC"),
+///     verifying_contract: &contract_addr,
 /// };
 /// let sep = domain.separator();
 /// ```

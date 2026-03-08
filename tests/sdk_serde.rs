@@ -82,7 +82,7 @@ mod btc_serde {
         let sig = signer.sign(b"der roundtrip").unwrap();
         let bytes = sig.to_bytes();
         let restored = BitcoinSignature::from_bytes(&bytes).unwrap();
-        assert_eq!(sig.der_bytes, restored.der_bytes);
+        assert_eq!(sig.der_bytes(), restored.der_bytes());
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod json_btc {
         let sig = signer.sign(b"json test").unwrap();
         let json = serde_json::to_string(&sig).unwrap();
         let restored: BitcoinSignature = serde_json::from_str(&json).unwrap();
-        assert_eq!(sig.der_bytes, restored.der_bytes);
+        assert_eq!(sig.der_bytes(), restored.der_bytes());
     }
 
     #[test]

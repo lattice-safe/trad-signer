@@ -4,7 +4,7 @@
 //! (P2PKH, P2WPKH, P2SH, P2TR), replacing the limited BIP-137 format.
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::bitcoin::message;
 //!
 //! let hash = message::message_hash(b"Hello World");
@@ -13,6 +13,7 @@
 
 use crate::crypto;
 use crate::encoding;
+use crate::traits::Signer;
 
 /// BIP-322 tagged hash tag for message hashing.
 const BIP322_TAG: &[u8] = b"BIP0322-signed-message";
@@ -161,6 +162,126 @@ pub fn p2tr_script_pubkey(x_only_pubkey: &[u8; 32]) -> Vec<u8> {
     script.push(0x20); // OP_PUSH32
     script.extend_from_slice(x_only_pubkey);
     script
+}
+
+// ─── BIP-322 Simple Signing ────────────────────────────────────────
+
+/// BIP-322 "simple" message signing for P2WPKH addresses.
+///
+/// Builds the complete BIP-322 signing flow:
+/// 1. Build `to_spend` virtual transaction
+/// 2. Compute its txid
+/// 3. Build `to_sign` virtual transaction spending `to_spend`
+/// 4. Compute the BIP-143 sighash for the `to_sign` input
+/// 5. Sign with ECDSA and return the witness-serialized `to_sign` tx
+///
+/// Returns the serialized `to_sign` transaction with witness data.
+pub fn sign_simple_p2wpkh(
+    signer: &super::BitcoinSigner,
+    message: &[u8],
+) -> Result<Vec<u8>, crate::error::SignerError> {
+    use crate::traits::KeyPair;
+
+    let pubkey = signer.public_key_bytes();
+    let pubkey_hash = crypto::hash160(&pubkey);
+    let script_pk = p2wpkh_script_pubkey(&pubkey_hash);
+
+    // Step 1-2: Build to_spend and get its txid
+    let to_spend = create_to_spend_tx(&script_pk, message);
+    let to_spend_txid = compute_txid(&to_spend);
+
+    // Step 3: Build to_sign (spending to_spend:0)
+    // We need the sighash, so we build the tx structure manually
+    use super::transaction::*;
+    use super::sighash;
+    use super::tapscript::SighashType;
+
+    let mut tx = Transaction::new(0);
+    let mut txid_internal = to_spend_txid;
+    txid_internal.reverse(); // convert from display order back to internal
+    tx.inputs.push(TxIn {
+        previous_output: OutPoint { txid: txid_internal, vout: 0 },
+        script_sig: vec![],
+        sequence: 0,
+    });
+    tx.outputs.push(TxOut {
+        value: 0,
+        script_pubkey: vec![0x6a], // OP_RETURN
+    });
+
+    // Step 4: Compute BIP-143 sighash
+    let script_code = sighash::p2wpkh_script_code(&pubkey_hash);
+    let prev_out = sighash::PrevOut {
+        script_code,
+        value: 0, // to_spend output value is 0
+    };
+    let sighash_value = sighash::segwit_v0_sighash(&tx, 0, &prev_out, SighashType::All)?;
+
+    // Step 5: Sign the sighash
+    let sig = signer.sign_digest(&sighash_value)?;
+    let mut sig_bytes = sig.to_bytes();
+    sig_bytes.push(SighashType::All.to_byte()); // append sighash flag
+
+    // Build witness: [signature, pubkey]
+    tx.witnesses.push(vec![sig_bytes, pubkey.to_vec()]);
+
+    Ok(tx.serialize_witness())
+}
+
+/// BIP-322 "simple" message signing for P2TR (Taproot) addresses.
+///
+/// Uses Schnorr key-path signing with BIP-341 sighash.
+///
+/// Returns the serialized `to_sign` transaction with witness data.
+pub fn sign_simple_p2tr(
+    signer: &super::schnorr::SchnorrSigner,
+    message: &[u8],
+) -> Result<Vec<u8>, crate::error::SignerError> {
+    use crate::traits::KeyPair;
+
+    let x_only_pubkey_bytes = signer.public_key_bytes();
+    let mut x_only = [0u8; 32];
+    x_only.copy_from_slice(&x_only_pubkey_bytes);
+    let script_pk = p2tr_script_pubkey(&x_only);
+
+    // Build to_spend and get txid
+    let to_spend = create_to_spend_tx(&script_pk, message);
+    let to_spend_txid = compute_txid(&to_spend);
+
+    use super::transaction::*;
+    use super::sighash;
+    use super::tapscript::SighashType;
+
+    let mut tx = Transaction::new(0);
+    let mut txid_internal = to_spend_txid;
+    txid_internal.reverse();
+    tx.inputs.push(TxIn {
+        previous_output: OutPoint { txid: txid_internal, vout: 0 },
+        script_sig: vec![],
+        sequence: 0,
+    });
+    tx.outputs.push(TxOut {
+        value: 0,
+        script_pubkey: vec![0x6a], // OP_RETURN
+    });
+
+    // Compute BIP-341 Taproot sighash
+    let prevouts = vec![TxOut {
+        value: 0,
+        script_pubkey: script_pk,
+    }];
+    let sighash_value = sighash::taproot_key_path_sighash(
+        &tx, 0, &prevouts, SighashType::Default,
+    )?;
+
+    // Sign with Schnorr (BIP-340 signs the raw message)
+    use crate::traits::Signer;
+    let sig = signer.sign(&sighash_value)?;
+
+    // Taproot witness: [schnorr_signature] (no sighash byte for Default)
+    tx.witnesses.push(vec![sig.bytes.to_vec()]);
+
+    Ok(tx.serialize_witness())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────

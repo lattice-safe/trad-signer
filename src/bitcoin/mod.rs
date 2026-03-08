@@ -9,6 +9,8 @@ pub mod taproot;
 pub mod tapscript;
 pub mod psbt;
 pub mod descriptor;
+pub mod transaction;
+pub mod sighash;
 
 use crate::crypto;
 use crate::encoding;
@@ -23,14 +25,21 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BitcoinSignature {
-    /// DER-encoded signature bytes.
-    pub der_bytes: Vec<u8>,
+    /// DER-encoded signature bytes (private to prevent mutation).
+    der_bytes: Vec<u8>,
 }
 
 impl BitcoinSignature {
     /// Export the DER-encoded signature bytes.
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.der_bytes.clone()
+    }
+
+    /// Get a reference to the DER-encoded signature bytes.
+    #[must_use]
+    pub fn der_bytes(&self) -> &[u8] {
+        &self.der_bytes
     }
 
     /// Import from DER-encoded signature bytes.
@@ -57,11 +66,7 @@ pub struct BitcoinSigner {
     signing_key: SigningKey,
 }
 
-impl Drop for BitcoinSigner {
-    fn drop(&mut self) {
-        // k256::SigningKey implements ZeroizeOnDrop internally
-    }
-}
+// k256::SigningKey implements ZeroizeOnDrop internally — no explicit Drop needed.
 
 impl BitcoinSigner {
     /// Sign a pre-computed 32-byte digest.
@@ -82,27 +87,35 @@ impl BitcoinSigner {
     ///
     /// Uses version byte 0x80 (mainnet) with compression flag.
     /// Result starts with `K` or `L`.
-    pub fn to_wif(&self) -> String {
-        let mut payload = Vec::with_capacity(34);
+    ///
+    /// # Security
+    /// The returned String contains the private key — handle with care.
+    #[must_use]
+    pub fn to_wif(&self) -> Zeroizing<String> {
+        let mut payload = Zeroizing::new(Vec::with_capacity(38));
         payload.push(0x80); // mainnet version
         payload.extend_from_slice(&self.signing_key.to_bytes());
         payload.push(0x01); // compressed flag
         let checksum = double_sha256(&payload);
         payload.extend_from_slice(&checksum[..4]);
-        bs58::encode(payload).into_string()
+        Zeroizing::new(bs58::encode(&*payload).into_string())
     }
 
     /// Export the private key in **testnet WIF** format.
     ///
     /// Uses version byte 0xEF (testnet). Result starts with `c`.
-    pub fn to_wif_testnet(&self) -> String {
-        let mut payload = Vec::with_capacity(34);
+    ///
+    /// # Security
+    /// The returned String contains the private key — handle with care.
+    #[must_use]
+    pub fn to_wif_testnet(&self) -> Zeroizing<String> {
+        let mut payload = Zeroizing::new(Vec::with_capacity(38));
         payload.push(0xEF); // testnet version
         payload.extend_from_slice(&self.signing_key.to_bytes());
         payload.push(0x01); // compressed flag
         let checksum = double_sha256(&payload);
         payload.extend_from_slice(&checksum[..4]);
-        bs58::encode(payload).into_string()
+        Zeroizing::new(bs58::encode(&*payload).into_string())
     }
 
     /// Import a private key from **WIF** (Wallet Import Format).
@@ -110,9 +123,11 @@ impl BitcoinSigner {
     /// Accepts mainnet (`5`/`K`/`L`) and testnet (`9`/`c`) WIF strings.
     pub fn from_wif(wif: &str) -> Result<Self, SignerError> {
         use crate::traits::KeyPair;
-        let decoded = bs58::decode(wif)
-            .into_vec()
-            .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid WIF base58: {e}")))?;
+        let decoded = Zeroizing::new(
+            bs58::decode(wif)
+                .into_vec()
+                .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid WIF base58: {e}")))?,
+        );
 
         // Validate length: 37 (uncompressed) or 38 (compressed)
         if decoded.len() != 37 && decoded.len() != 38 {
@@ -130,10 +145,11 @@ impl BitcoinSigner {
             )));
         }
 
-        // Validate checksum
+        // Validate checksum (constant-time comparison)
         let payload_len = decoded.len() - 4;
         let checksum = double_sha256(&decoded[..payload_len]);
-        if decoded[payload_len..] != checksum[..4] {
+        use subtle::ConstantTimeEq;
+        if decoded[payload_len..].ct_eq(&checksum[..4]).unwrap_u8() != 1 {
             return Err(SignerError::InvalidPrivateKey("invalid WIF checksum".into()));
         }
 
@@ -146,6 +162,7 @@ impl BitcoinSigner {
     /// Generate a **P2PKH** address (`1...`) from the compressed public key.
     ///
     /// Formula: Base58Check(0x00 || HASH160(compressed_pubkey))
+    #[must_use]
     pub fn p2pkh_address(&self) -> String {
         let pubkey = self.signing_key.verifying_key().to_sec1_bytes();
         let h160 = hash160(&pubkey);
@@ -331,6 +348,11 @@ impl traits::KeyPair for BitcoinSigner {
 }
 
 /// Bitcoin ECDSA verifier.
+///
+/// # Verification Semantics
+/// - `Ok(true)` — signature is valid.
+/// - `Ok(false)` — signature is mathematically invalid (wrong key or tampered data).
+/// - `Err(...)` — signature could not be parsed (malformed DER encoding, wrong length, etc.).
 pub struct BitcoinVerifier {
     verifying_key: VerifyingKey,
 }
@@ -432,7 +454,7 @@ mod tests {
         let signer = BitcoinSigner::from_bytes(&privkey).unwrap();
         let sig1 = signer.sign(b"Satoshi Nakamoto").unwrap();
         let sig2 = signer.sign(b"Satoshi Nakamoto").unwrap();
-        assert_eq!(sig1.der_bytes, sig2.der_bytes);
+        assert_eq!(sig1.der_bytes(), sig2.der_bytes());
     }
 
     #[test]
@@ -454,7 +476,7 @@ mod tests {
         // Sign "Satoshi Nakamoto" with double-SHA256
         let sig = signer.sign(b"Satoshi Nakamoto").unwrap();
         // DER signature must be valid and deterministic
-        assert!(!sig.der_bytes.is_empty());
+        assert!(!sig.der_bytes().is_empty());
         // Verify it
         let verifier = BitcoinVerifier::from_public_key_bytes(&pubkey).unwrap();
         assert!(verifier.verify(b"Satoshi Nakamoto", &sig).unwrap());
@@ -472,7 +494,7 @@ mod tests {
         assert!(verifier.verify(b"Satoshi Nakamoto", &sig).unwrap());
         // Deterministic: sign again and compare
         let sig2 = signer.sign(b"Satoshi Nakamoto").unwrap();
-        assert_eq!(sig.der_bytes, sig2.der_bytes);
+        assert_eq!(sig.der_bytes(), sig2.der_bytes());
     }
 
     #[test]
@@ -480,9 +502,9 @@ mod tests {
         let signer = BitcoinSigner::generate().unwrap();
         let sig = signer.sign(b"DER test").unwrap();
         // DER signatures start with 0x30 (SEQUENCE tag)
-        assert_eq!(sig.der_bytes[0], 0x30);
+        assert_eq!(sig.der_bytes()[0], 0x30);
         // Length should be reasonable (70-72 bytes typically)
-        assert!(sig.der_bytes.len() >= 68 && sig.der_bytes.len() <= 72);
+        assert!(sig.der_bytes().len() >= 68 && sig.der_bytes().len() <= 72);
     }
 
     #[test]
@@ -498,12 +520,22 @@ mod tests {
         let sig = signer.sign(b"tamper test").unwrap();
         let verifier = BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
 
-        let mut tampered = sig.clone();
-        if let Some(byte) = tampered.der_bytes.last_mut() {
-            *byte ^= 0xff;
+        let tampered_bytes: Vec<u8> = {
+            let mut b = sig.to_bytes();
+            if let Some(byte) = b.last_mut() {
+                *byte ^= 0xff;
+            }
+            b
+        };
+        let tampered = BitcoinSignature::from_bytes(&tampered_bytes);
+        // Tampered DER may fail to parse (Err) or verify as invalid (Ok(false))
+        match tampered {
+            Ok(t) => {
+                let result = verifier.verify(b"tamper test", &t);
+                assert!(result.is_err() || !result.unwrap());
+            }
+            Err(_) => {} // tampered DER is invalid — expected
         }
-        let result = verifier.verify(b"tamper test", &tampered);
-        assert!(result.is_err() || !result.unwrap());
     }
 
     #[test]
@@ -603,7 +635,7 @@ mod tests {
         let signer = BitcoinSigner::generate().unwrap();
         let sig = signer.sign_message(b"Hello Bitcoin").unwrap();
         // BIP-137 uses the same ECDSA path → DER encoded
-        assert_eq!(sig.der_bytes[0], 0x30); // DER SEQUENCE tag
+        assert_eq!(sig.der_bytes()[0], 0x30); // DER SEQUENCE tag
         // Verify round-trip
         let verifier = BitcoinVerifier::from_public_key_bytes(&signer.public_key_bytes()).unwrap();
         let digest = bitcoin_message_hash(b"Hello Bitcoin");

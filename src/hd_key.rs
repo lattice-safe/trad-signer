@@ -4,14 +4,16 @@
 //! and BIP-44 path parsing (`m/44'/60'/0'/0/0`).
 //!
 //! # Example
-//! ```ignore
+//! ```no_run
 //! use trad_signer::hd_key::{ExtendedPrivateKey, DerivationPath};
 //!
-//! let seed = [0xab_u8; 64];
-//! let master = ExtendedPrivateKey::from_seed(&seed)?;
-//! let path = DerivationPath::parse("m/44'/60'/0'/0/0")?;
-//! let child = master.derive_path(&path)?;
-//! let eth_signer = child.to_ethereum_signer()?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let seed = [0xab_u8; 64];
+//!     let master = ExtendedPrivateKey::from_seed(&seed)?;
+//!     let path = DerivationPath::parse("m/44'/60'/0'/0/0")?;
+//!     let child = master.derive_path(&path)?;
+//!     Ok(())
+//! }
 //! ```
 
 use crate::crypto;
@@ -31,7 +33,9 @@ pub struct ExtendedPrivateKey {
     /// The 32-byte private key scalar.
     key: Zeroizing<[u8; 32]>,
     /// The 32-byte chain code used for child derivation.
-    chain_code: [u8; 32],
+    /// Chain code is security-sensitive: knowing it + public key enables
+    /// deriving all non-hardened child keys.
+    chain_code: Zeroizing<[u8; 32]>,
     /// Derivation depth (0 = master).
     depth: u8,
     /// Parent key fingerprint (first 4 bytes of HASH160(parent_pubkey)).
@@ -42,8 +46,7 @@ pub struct ExtendedPrivateKey {
 
 impl Drop for ExtendedPrivateKey {
     fn drop(&mut self) {
-        // key is Zeroizing, chain_code is not secret but good practice
-        self.chain_code = [0u8; 32];
+        // key and chain_code are both Zeroizing — automatically scrubbed on drop.
     }
 }
 
@@ -63,12 +66,18 @@ impl ExtendedPrivateKey {
         let mut mac = HmacSha512::new_from_slice(BIP32_SEED_KEY)
             .map_err(|_| SignerError::InvalidPrivateKey("HMAC init failed".into()))?;
         mac.update(seed);
-        let result = mac.finalize().into_bytes();
+        let mut result = mac.finalize().into_bytes();
 
         let mut key = Zeroizing::new([0u8; 32]);
         key.copy_from_slice(&result[..32]);
-        let mut chain_code = [0u8; 32];
+        let mut chain_code = Zeroizing::new([0u8; 32]);
         chain_code.copy_from_slice(&result[32..]);
+
+        // Zeroize the full HMAC output immediately
+        use zeroize::Zeroize;
+        for b in result.iter_mut() {
+            b.zeroize();
+        }
 
         // Validate the key is a valid secp256k1 scalar
         k256::SecretKey::from_bytes((&*key).into())
@@ -89,7 +98,7 @@ impl ExtendedPrivateKey {
     pub fn derive_child(&self, index: u32, hardened: bool) -> Result<Self, SignerError> {
         use zeroize::Zeroize;
 
-        let mut mac = HmacSha512::new_from_slice(&self.chain_code)
+        let mut mac = HmacSha512::new_from_slice(&*self.chain_code)
             .map_err(|_| SignerError::InvalidPrivateKey("HMAC init failed".into()))?;
 
         let effective_index = if hardened {
@@ -116,7 +125,7 @@ impl ExtendedPrivateKey {
 
         let mut il = [0u8; 32];
         il.copy_from_slice(&result[..32]);
-        let mut child_chain = [0u8; 32];
+        let mut child_chain = Zeroizing::new([0u8; 32]);
         child_chain.copy_from_slice(&result[32..]);
 
         // Zeroize the full HMAC output immediately — il and child_chain are copies
@@ -177,7 +186,7 @@ impl ExtendedPrivateKey {
     pub fn derive_path(&self, path: &DerivationPath) -> Result<Self, SignerError> {
         let mut current = Self {
             key: self.key.clone(),
-            chain_code: self.chain_code,
+            chain_code: self.chain_code.clone(),
             depth: self.depth,
             parent_fingerprint: self.parent_fingerprint,
             child_index: self.child_index,
@@ -189,6 +198,7 @@ impl ExtendedPrivateKey {
     }
 
     /// Get the raw 32-byte private key.
+    #[must_use]
     pub fn private_key_bytes(&self) -> Zeroizing<Vec<u8>> {
         Zeroizing::new(self.key.to_vec())
     }
@@ -201,11 +211,13 @@ impl ExtendedPrivateKey {
     }
 
     /// Get the current derivation depth (0 = master).
+    #[must_use]
     pub fn depth(&self) -> u8 {
         self.depth
     }
 
     /// Get the chain code (useful for extended public key export).
+    #[must_use]
     pub fn chain_code(&self) -> &[u8; 32] {
         &self.chain_code
     }
@@ -223,30 +235,34 @@ impl ExtendedPrivateKey {
     /// Serialize as an **xprv** Base58Check string (BIP-32).
     ///
     /// Format: `4 bytes version || 1 byte depth || 4 bytes fingerprint || 4 bytes child index || 32 bytes chain code || 1 byte 0x00 || 32 bytes key`
-    pub fn to_xprv(&self) -> String {
-        let mut data = Vec::with_capacity(78);
+    ///
+    /// # Security
+    /// The returned String contains the private key — handle with care.
+    #[must_use]
+    pub fn to_xprv(&self) -> Zeroizing<String> {
+        let mut data = Zeroizing::new(Vec::with_capacity(82));
         data.extend_from_slice(&[0x04, 0x88, 0xAD, 0xE4]); // xprv version
         data.push(self.depth);
         data.extend_from_slice(&self.parent_fingerprint);
         data.extend_from_slice(&self.child_index.to_be_bytes());
-        data.extend_from_slice(&self.chain_code);
+        data.extend_from_slice(&*self.chain_code);
         data.push(0x00); // private key prefix
         data.extend_from_slice(&*self.key);
         // Base58Check: double-SHA256 checksum
         let checksum = crypto::double_sha256(&data);
         data.extend_from_slice(&checksum[..4]);
-        bs58::encode(data).into_string()
+        Zeroizing::new(bs58::encode(&*data).into_string())
     }
 
     /// Serialize the public key as an **xpub** Base58Check string (BIP-32).
     pub fn to_xpub(&self) -> Result<String, SignerError> {
         let pubkey = self.public_key_bytes()?;
-        let mut data = Vec::with_capacity(78);
+        let mut data = Vec::with_capacity(82);
         data.extend_from_slice(&[0x04, 0x88, 0xB2, 0x1E]); // xpub version
         data.push(self.depth);
         data.extend_from_slice(&self.parent_fingerprint);
         data.extend_from_slice(&self.child_index.to_be_bytes());
-        data.extend_from_slice(&self.chain_code);
+        data.extend_from_slice(&*self.chain_code);
         data.extend_from_slice(&pubkey);
         let checksum = crypto::double_sha256(&data);
         data.extend_from_slice(&checksum[..4]);
@@ -255,17 +271,20 @@ impl ExtendedPrivateKey {
 
     /// Deserialize an **xprv** Base58Check string back into an extended private key.
     pub fn from_xprv(xprv: &str) -> Result<Self, SignerError> {
-        let data = bs58::decode(xprv)
-            .into_vec()
-            .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid base58: {e}")))?;
+        let data = Zeroizing::new(
+            bs58::decode(xprv)
+                .into_vec()
+                .map_err(|e| SignerError::InvalidPrivateKey(format!("invalid base58: {e}")))?,
+        );
         if data.len() != 82 {
             return Err(SignerError::InvalidPrivateKey(format!(
                 "xprv must be 82 bytes, got {}", data.len()
             )));
         }
-        // Verify checksum
+        // Verify checksum (constant-time)
         let checksum = crypto::double_sha256(&data[..78]);
-        if data[78..82] != checksum[..4] {
+        use subtle::ConstantTimeEq;
+        if data[78..82].ct_eq(&checksum[..4]).unwrap_u8() != 1 {
             return Err(SignerError::InvalidPrivateKey("invalid xprv checksum".into()));
         }
         // Verify version
@@ -276,7 +295,7 @@ impl ExtendedPrivateKey {
         let mut parent_fingerprint = [0u8; 4];
         parent_fingerprint.copy_from_slice(&data[5..9]);
         let child_index = u32::from_be_bytes([data[9], data[10], data[11], data[12]]);
-        let mut chain_code = [0u8; 32];
+        let mut chain_code = Zeroizing::new([0u8; 32]);
         chain_code.copy_from_slice(&data[13..45]);
         // data[45] should be 0x00 (private key prefix)
         if data[45] != 0x00 {
@@ -287,6 +306,190 @@ impl ExtendedPrivateKey {
         // Validate the key
         k256::SecretKey::from_bytes((&*key).into())
             .map_err(|_| SignerError::InvalidPrivateKey("invalid xprv key".into()))?;
+        Ok(Self { key, chain_code, depth, parent_fingerprint, child_index })
+    }
+
+    /// Convert to an `ExtendedPublicKey` for watch-only derivation.
+    pub fn to_extended_public_key(&self) -> Result<ExtendedPublicKey, SignerError> {
+        let pubkey_bytes = self.public_key_bytes()?;
+        let mut key = [0u8; 33];
+        key.copy_from_slice(&pubkey_bytes);
+        Ok(ExtendedPublicKey {
+            key,
+            chain_code: *self.chain_code,
+            depth: self.depth,
+            parent_fingerprint: self.parent_fingerprint,
+            child_index: self.child_index,
+        })
+    }
+}
+
+// ─── Extended Public Key (BIP-32 Watch-Only) ────────────────────────
+
+/// A BIP-32 extended public key for watch-only wallets.
+///
+/// Supports **normal** (non-hardened) child derivation only.
+/// Hardened derivation requires the private key.
+#[derive(Clone, Debug)]
+pub struct ExtendedPublicKey {
+    /// Compressed SEC1 public key (33 bytes).
+    key: [u8; 33],
+    /// Chain code (32 bytes).
+    chain_code: [u8; 32],
+    /// Derivation depth.
+    depth: u8,
+    /// Parent key fingerprint.
+    parent_fingerprint: [u8; 4],
+    /// Child index.
+    child_index: u32,
+}
+
+impl ExtendedPublicKey {
+    /// Get the compressed public key (33 bytes).
+    #[must_use]
+    pub fn public_key_bytes(&self) -> &[u8; 33] {
+        &self.key
+    }
+
+    /// Get the derivation depth.
+    #[must_use]
+    pub fn depth(&self) -> u8 {
+        self.depth
+    }
+
+    /// Get the chain code.
+    #[must_use]
+    pub fn chain_code(&self) -> &[u8; 32] {
+        &self.chain_code
+    }
+
+    /// Get the parent fingerprint.
+    #[must_use]
+    pub fn parent_fingerprint(&self) -> &[u8; 4] {
+        &self.parent_fingerprint
+    }
+
+    /// Get the child index.
+    #[must_use]
+    pub fn child_index(&self) -> u32 {
+        self.child_index
+    }
+
+    /// Derive a **normal** (non-hardened) child public key.
+    ///
+    /// Only normal derivation (index < 2^31) is supported.
+    /// Hardened derivation requires the private key.
+    pub fn derive_child_normal(&self, index: u32) -> Result<Self, SignerError> {
+        if index >= 0x8000_0000 {
+            return Err(SignerError::InvalidPrivateKey(
+                "hardened derivation requires private key".into(),
+            ));
+        }
+
+        let mut mac = HmacSha512::new_from_slice(&self.chain_code)
+            .map_err(|_| SignerError::InvalidPrivateKey("HMAC init failed".into()))?;
+
+        // For normal child: HMAC-SHA512(chain_code, pubkey || index)
+        mac.update(&self.key);
+        mac.update(&index.to_be_bytes());
+
+        let result = mac.finalize().into_bytes();
+
+        let mut il = [0u8; 32];
+        il.copy_from_slice(&result[..32]);
+        let mut child_chain = [0u8; 32];
+        child_chain.copy_from_slice(&result[32..]);
+
+        // Parse IL as scalar and add to parent point
+        use k256::elliptic_curve::ops::Reduce;
+        use k256::{ProjectivePoint, Scalar, U256};
+        use k256::elliptic_curve::group::GroupEncoding;
+
+        let il_scalar = <Scalar as Reduce<U256>>::reduce(U256::from_be_slice(&il));
+        let parent_point = k256::AffinePoint::from_bytes((&self.key).into());
+        let parent_proj: ProjectivePoint = Option::from(parent_point.map(ProjectivePoint::from))
+            .ok_or_else(|| SignerError::InvalidPublicKey("invalid parent public key".into()))?;
+
+        let child_point = parent_proj + ProjectivePoint::GENERATOR * il_scalar;
+
+        // Serialize child public key
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        let child_affine = child_point.to_affine();
+        let encoded = child_affine.to_encoded_point(true);
+        let child_key_bytes = encoded.as_bytes();
+        if child_key_bytes.len() != 33 {
+            return Err(SignerError::InvalidPublicKey("child key serialization failed".into()));
+        }
+        let mut child_key = [0u8; 33];
+        child_key.copy_from_slice(child_key_bytes);
+
+        // Parent fingerprint = first 4 bytes of HASH160(parent_pubkey)
+        let fingerprint = crypto::hash160(&self.key);
+        let mut parent_fp = [0u8; 4];
+        parent_fp.copy_from_slice(&fingerprint[..4]);
+
+        // Zeroize IL
+        use zeroize::Zeroize;
+        il.zeroize();
+
+        Ok(Self {
+            key: child_key,
+            chain_code: child_chain,
+            depth: self.depth.checked_add(1).ok_or_else(|| {
+                SignerError::InvalidPrivateKey("derivation depth overflow".into())
+            })?,
+            parent_fingerprint: parent_fp,
+            child_index: index,
+        })
+    }
+
+    /// Serialize as an **xpub** Base58Check string.
+    #[must_use]
+    pub fn to_xpub(&self) -> String {
+        let mut data = Vec::with_capacity(82);
+        data.extend_from_slice(&[0x04, 0x88, 0xB2, 0x1E]); // xpub version
+        data.push(self.depth);
+        data.extend_from_slice(&self.parent_fingerprint);
+        data.extend_from_slice(&self.child_index.to_be_bytes());
+        data.extend_from_slice(&self.chain_code);
+        data.extend_from_slice(&self.key);
+        let checksum = crypto::double_sha256(&data);
+        data.extend_from_slice(&checksum[..4]);
+        bs58::encode(data).into_string()
+    }
+
+    /// Deserialize an **xpub** Base58Check string.
+    pub fn from_xpub(xpub: &str) -> Result<Self, SignerError> {
+        let data = bs58::decode(xpub)
+            .into_vec()
+            .map_err(|e| SignerError::InvalidPublicKey(format!("invalid base58: {e}")))?;
+        if data.len() != 82 {
+            return Err(SignerError::InvalidPublicKey(format!(
+                "xpub must be 82 bytes, got {}", data.len()
+            )));
+        }
+        let checksum = crypto::double_sha256(&data[..78]);
+        use subtle::ConstantTimeEq;
+        if data[78..82].ct_eq(&checksum[..4]).unwrap_u8() != 1 {
+            return Err(SignerError::InvalidPublicKey("invalid xpub checksum".into()));
+        }
+        if data[..4] != [0x04, 0x88, 0xB2, 0x1E] {
+            return Err(SignerError::InvalidPublicKey("not an xpub (wrong version)".into()));
+        }
+        let depth = data[4];
+        let mut parent_fingerprint = [0u8; 4];
+        parent_fingerprint.copy_from_slice(&data[5..9]);
+        let child_index = u32::from_be_bytes([data[9], data[10], data[11], data[12]]);
+        let mut chain_code = [0u8; 32];
+        chain_code.copy_from_slice(&data[13..45]);
+        let mut key = [0u8; 33];
+        key.copy_from_slice(&data[45..78]);
+        // Validate the public key is on the curve
+        let _pt = k256::AffinePoint::from_bytes((&key).into());
+        use k256::elliptic_curve::group::GroupEncoding;
+        if bool::from(k256::AffinePoint::from_bytes((&key).into()).is_none()) {
+            return Err(SignerError::InvalidPublicKey("invalid xpub key point".into()));
+        }
         Ok(Self { key, chain_code, depth, parent_fingerprint, child_index })
     }
 }
@@ -582,7 +785,7 @@ mod tests {
         let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
         assert_eq!(
-            master.to_xprv(),
+            &*master.to_xprv(),
             "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
         );
     }
@@ -603,7 +806,7 @@ mod tests {
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
         let child = master.derive_child(0, true).unwrap();
         assert_eq!(
-            child.to_xprv(),
+            &*child.to_xprv(),
             "xprv9uHRZZhk6KAJC1avXpDAp4MDc3sQKNxDiPvvkX8Br5ngLNv1TxvUxt4cV1rGL5hj6KCesnDYUhd7oWgT11eZG7XnxHrnYeSvkzY7d2bhkJ7"
         );
         assert_eq!(
@@ -641,7 +844,7 @@ mod tests {
         ).unwrap();
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
         assert_eq!(
-            master.to_xprv(),
+            &*master.to_xprv(),
             "xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U"
         );
     }
@@ -654,7 +857,7 @@ mod tests {
         let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
         let child = master.derive_child(0, false).unwrap();
         assert_eq!(
-            child.to_xprv(),
+            &*child.to_xprv(),
             "xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt"
         );
     }

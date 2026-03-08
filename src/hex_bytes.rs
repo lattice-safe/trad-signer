@@ -28,7 +28,6 @@ pub fn deserialize<'de, const N: usize, D: Deserializer<'de>>(
 #[cfg(test)]
 #[cfg(feature = "serde")]
 mod tests {
-    use super::*;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
