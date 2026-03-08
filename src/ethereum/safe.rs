@@ -337,6 +337,274 @@ pub fn encode_get_transaction_hash(tx: &SafeTransaction) -> Vec<u8> {
     ])
 }
 
+// ─── Sorted Signature Packing ──────────────────────────────────────
+
+/// A signer-signature pair for auto-sorting.
+///
+/// The Safe contract requires signatures sorted by signer address (ascending).
+/// Use [`sign_and_sort`] to automatically handle this.
+#[derive(Debug, Clone)]
+pub struct SignerSignature {
+    /// The signer's 20-byte Ethereum address.
+    pub signer: [u8; 20],
+    /// The ECDSA signature.
+    pub signature: super::EthereumSignature,
+}
+
+/// Sign a Safe transaction with multiple signers and auto-sort by address.
+///
+/// This is the recommended high-level API for multi-owner signing.
+/// Signatures are returned sorted by signer address (ascending), ready
+/// for `encode_exec_transaction`.
+///
+/// # Example
+/// ```no_run
+/// use chains_sdk::ethereum::safe::*;
+/// use chains_sdk::ethereum::EthereumSigner;
+/// use chains_sdk::traits::KeyPair;
+///
+/// let owner1 = EthereumSigner::generate().unwrap();
+/// let owner2 = EthereumSigner::generate().unwrap();
+/// let domain = safe_domain_separator(1, &[0xAA; 20]);
+/// let tx = SafeTransaction {
+///     to: [0xBB; 20], value: [0u8; 32], data: vec![],
+///     operation: Operation::Call,
+///     safe_tx_gas: [0u8; 32], base_gas: [0u8; 32], gas_price: [0u8; 32],
+///     gas_token: [0u8; 20], refund_receiver: [0u8; 20], nonce: [0u8; 32],
+/// };
+/// let sorted_sigs = sign_and_sort(&tx, &[&owner1, &owner2], &domain).unwrap();
+/// let calldata = tx.encode_exec_transaction(&sorted_sigs);
+/// ```
+pub fn sign_and_sort(
+    tx: &SafeTransaction,
+    signers: &[&super::EthereumSigner],
+    domain_separator: &[u8; 32],
+) -> Result<Vec<super::EthereumSignature>, SignerError> {
+    let mut pairs: Vec<SignerSignature> = Vec::with_capacity(signers.len());
+    for signer in signers {
+        let sig = tx.sign(signer, domain_separator)?;
+        pairs.push(SignerSignature {
+            signer: signer.address(),
+            signature: sig,
+        });
+    }
+    // Sort by signer address (ascending) — required by Safe contract
+    pairs.sort_by(|a, b| a.signer.cmp(&b.signer));
+    Ok(pairs.into_iter().map(|p| p.signature).collect())
+}
+
+/// Encode signatures auto-sorted by recovering their addresses from the hash.
+///
+/// This is the safest approach — it recovers each signer address via `ecrecover`
+/// and sorts automatically. Requires the `safeTxHash` to recover addresses.
+pub fn encode_signatures_sorted(
+    signatures: &[super::EthereumSignature],
+    safe_tx_hash: &[u8; 32],
+) -> Result<Vec<u8>, SignerError> {
+    let mut pairs: Vec<([u8; 20], &super::EthereumSignature)> =
+        Vec::with_capacity(signatures.len());
+    for sig in signatures {
+        let addr = super::ecrecover_digest(safe_tx_hash, sig)?;
+        pairs.push((addr, sig));
+    }
+    // Sort by recovered address (ascending)
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut packed = Vec::with_capacity(pairs.len() * 65);
+    for (_, sig) in &pairs {
+        packed.extend_from_slice(&sig.r);
+        packed.extend_from_slice(&sig.s);
+        packed.push(sig.v as u8);
+    }
+    Ok(packed)
+}
+
+// ─── On-Chain Approval (approveHash) ───────────────────────────────
+
+/// ABI-encode `approveHash(bytes32 hashToApprove)`.
+///
+/// Alternative to off-chain signing: an owner sends a transaction to the Safe
+/// calling `approveHash` to register their approval on-chain.
+/// Then `execTransaction` is called with a pre-validated signature type (v=1).
+#[must_use]
+pub fn encode_approve_hash(hash: &[u8; 32]) -> Vec<u8> {
+    let func = abi::Function::new("approveHash(bytes32)");
+    func.encode(&[AbiValue::Uint256(*hash)])
+}
+
+/// Create a pre-validated signature for an owner who approved the hash on-chain.
+///
+/// In Safe's signature format, `v=1` means "approval-based":
+/// - `r` = owner address (left-padded to 32 bytes)
+/// - `s` = zero
+/// - `v` = 1
+#[must_use]
+pub fn pre_validated_signature(owner: [u8; 20]) -> super::EthereumSignature {
+    super::EthereumSignature {
+        r: pad_address(&owner),
+        s: [0u8; 32],
+        v: 1,
+    }
+}
+
+/// ABI-encode `approvedHashes(address owner, bytes32 hash)`.
+///
+/// Query whether an owner has approved a specific hash.
+/// Returns uint256(1) if approved, 0 if not.
+#[must_use]
+pub fn encode_approved_hashes(owner: [u8; 20], hash: &[u8; 32]) -> Vec<u8> {
+    let func = abi::Function::new("approvedHashes(address,bytes32)");
+    func.encode(&[AbiValue::Address(owner), AbiValue::Uint256(*hash)])
+}
+
+// ─── Contract Signature (EIP-1271) ─────────────────────────────────
+
+/// Create a contract signature for a smart-contract owner (EIP-1271).
+///
+/// In Safe's signature format, `v=0` means "contract signature":
+/// - `r` = contract address (left-padded to 32 bytes)
+/// - `s` = offset into the signatures where the contract sig data starts
+/// - `v` = 0
+///
+/// The actual contract signature data is appended after the fixed-size
+/// signature block.
+#[must_use]
+pub fn contract_signature(contract_owner: [u8; 20], data_offset: u32) -> super::EthereumSignature {
+    let mut s = [0u8; 32];
+    s[28..32].copy_from_slice(&data_offset.to_be_bytes());
+    super::EthereumSignature {
+        r: pad_address(&contract_owner),
+        s,
+        v: 0,
+    }
+}
+
+// ─── Module Execution ──────────────────────────────────────────────
+
+/// ABI-encode `execTransactionFromModule(address to, uint256 value, bytes data, uint8 operation)`.
+///
+/// Called by an enabled module to execute a transaction without signatures.
+#[must_use]
+pub fn encode_exec_from_module(
+    to: [u8; 20],
+    value: &[u8; 32],
+    data: &[u8],
+    operation: Operation,
+) -> Vec<u8> {
+    let func = abi::Function::new("execTransactionFromModule(address,uint256,bytes,uint8)");
+    func.encode(&[
+        AbiValue::Address(to),
+        AbiValue::Uint256(*value),
+        AbiValue::Bytes(data.to_vec()),
+        AbiValue::Uint256(pad_u8(operation as u8)),
+    ])
+}
+
+/// ABI-encode `execTransactionFromModuleReturnData(...)`.
+///
+/// Same as `execTransactionFromModule` but returns `(bool success, bytes returnData)`.
+#[must_use]
+pub fn encode_exec_from_module_return_data(
+    to: [u8; 20],
+    value: &[u8; 32],
+    data: &[u8],
+    operation: Operation,
+) -> Vec<u8> {
+    let func = abi::Function::new(
+        "execTransactionFromModuleReturnData(address,uint256,bytes,uint8)",
+    );
+    func.encode(&[
+        AbiValue::Address(to),
+        AbiValue::Uint256(*value),
+        AbiValue::Bytes(data.to_vec()),
+        AbiValue::Uint256(pad_u8(operation as u8)),
+    ])
+}
+
+// ─── Additional Queries ────────────────────────────────────────────
+
+/// ABI-encode `isOwner(address owner)` calldata.
+#[must_use]
+pub fn encode_is_owner(owner: [u8; 20]) -> Vec<u8> {
+    let func = abi::Function::new("isOwner(address)");
+    func.encode(&[AbiValue::Address(owner)])
+}
+
+/// ABI-encode `domainSeparator()` calldata.
+///
+/// Query the Safe's on-chain domain separator (useful when chain_id is unknown).
+#[must_use]
+pub fn encode_domain_separator() -> Vec<u8> {
+    let func = abi::Function::new("domainSeparator()");
+    func.encode(&[])
+}
+
+/// ABI-encode `isModuleEnabled(address module)` calldata.
+#[must_use]
+pub fn encode_is_module_enabled(module: [u8; 20]) -> Vec<u8> {
+    let func = abi::Function::new("isModuleEnabled(address)");
+    func.encode(&[AbiValue::Address(module)])
+}
+
+/// ABI-encode `getModulesPaginated(address start, uint256 pageSize)` calldata.
+#[must_use]
+pub fn encode_get_modules_paginated(start: [u8; 20], page_size: u64) -> Vec<u8> {
+    let func = abi::Function::new("getModulesPaginated(address,uint256)");
+    func.encode(&[
+        AbiValue::Address(start),
+        AbiValue::from_u64(page_size),
+    ])
+}
+
+// ─── Safe Deployment ───────────────────────────────────────────────
+
+/// ABI-encode `setup(address[] calldata _owners, uint256 _threshold, ...)`.
+///
+/// The initializer called when deploying a new Safe proxy.
+#[must_use]
+pub fn encode_setup(
+    owners: &[[u8; 20]],
+    threshold: u64,
+    to: [u8; 20],
+    data: &[u8],
+    fallback_handler: [u8; 20],
+    payment_token: [u8; 20],
+    payment: u128,
+    payment_receiver: [u8; 20],
+) -> Vec<u8> {
+    let func = abi::Function::new(
+        "setup(address[],uint256,address,bytes,address,address,uint256,address)",
+    );
+    let owner_values: Vec<AbiValue> = owners.iter().map(|o| AbiValue::Address(*o)).collect();
+    func.encode(&[
+        AbiValue::Array(owner_values),
+        AbiValue::from_u64(threshold),
+        AbiValue::Address(to),
+        AbiValue::Bytes(data.to_vec()),
+        AbiValue::Address(fallback_handler),
+        AbiValue::Address(payment_token),
+        AbiValue::from_u128(payment),
+        AbiValue::Address(payment_receiver),
+    ])
+}
+
+/// ABI-encode `createProxyWithNonce(address singleton, bytes initializer, uint256 saltNonce)`.
+///
+/// Deploy a new Safe via the ProxyFactory.
+#[must_use]
+pub fn encode_create_proxy_with_nonce(
+    singleton: [u8; 20],
+    initializer: &[u8],
+    salt_nonce: u64,
+) -> Vec<u8> {
+    let func = abi::Function::new("createProxyWithNonce(address,bytes,uint256)");
+    func.encode(&[
+        AbiValue::Address(singleton),
+        AbiValue::Bytes(initializer.to_vec()),
+        AbiValue::from_u64(salt_nonce),
+    ])
+}
+
 // ─── Internal Helpers ──────────────────────────────────────────────
 
 fn keccak256(data: &[u8]) -> [u8; 32] {
@@ -391,7 +659,6 @@ mod tests {
     #[test]
     fn test_type_hash_matches_safe_contract() {
         let th = SafeTransaction::type_hash();
-        // Known Safe v1.3 SAFE_TX_TYPEHASH
         let expected = keccak256(
             b"SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)",
         );
@@ -504,14 +771,10 @@ mod tests {
     // ─── Signing Hash ─────────────────────────────────────────
 
     #[test]
-    fn test_signing_hash_starts_with_eip712_prefix() {
+    fn test_signing_hash_deterministic() {
         let tx = zero_tx();
         let domain = safe_domain_separator(1, &[0xAA; 20]);
-        // The signing hash is keccak256("\x19\x01" || domain || struct_hash)
-        // We can verify it's deterministic
-        let h1 = tx.signing_hash(&domain);
-        let h2 = tx.signing_hash(&domain);
-        assert_eq!(h1, h2);
+        assert_eq!(tx.signing_hash(&domain), tx.signing_hash(&domain));
     }
 
     #[test]
@@ -530,7 +793,6 @@ mod tests {
         let tx = zero_tx();
         let domain = safe_domain_separator(1, &[0xAA; 20]);
         let sig = tx.sign(&signer, &domain).unwrap();
-        // v should be 27 or 28
         assert!(sig.v == 27 || sig.v == 28);
         assert_ne!(sig.r, [0u8; 32]);
         assert_ne!(sig.s, [0u8; 32]);
@@ -547,6 +809,58 @@ mod tests {
         assert_eq!(recovered, signer.address());
     }
 
+    // ─── sign_and_sort ────────────────────────────────────────
+
+    #[test]
+    fn test_sign_and_sort_signatures_ordered_by_address() {
+        let s1 = super::super::EthereumSigner::generate().unwrap();
+        let s2 = super::super::EthereumSigner::generate().unwrap();
+        let s3 = super::super::EthereumSigner::generate().unwrap();
+        let tx = zero_tx();
+        let domain = safe_domain_separator(1, &[0xAA; 20]);
+        let sigs = sign_and_sort(&tx, &[&s1, &s2, &s3], &domain).unwrap();
+        assert_eq!(sigs.len(), 3);
+
+        // Verify addresses are sorted
+        let hash = tx.signing_hash(&domain);
+        let a1 = super::super::ecrecover_digest(&hash, &sigs[0]).unwrap();
+        let a2 = super::super::ecrecover_digest(&hash, &sigs[1]).unwrap();
+        let a3 = super::super::ecrecover_digest(&hash, &sigs[2]).unwrap();
+        assert!(a1 < a2);
+        assert!(a2 < a3);
+    }
+
+    #[test]
+    fn test_sign_and_sort_single_signer() {
+        let s1 = super::super::EthereumSigner::generate().unwrap();
+        let tx = zero_tx();
+        let domain = safe_domain_separator(1, &[0xAA; 20]);
+        let sigs = sign_and_sort(&tx, &[&s1], &domain).unwrap();
+        assert_eq!(sigs.len(), 1);
+    }
+
+    // ─── encode_signatures_sorted ─────────────────────────────
+
+    #[test]
+    fn test_encode_signatures_sorted_ecrecover() {
+        let s1 = super::super::EthereumSigner::generate().unwrap();
+        let s2 = super::super::EthereumSigner::generate().unwrap();
+        let tx = zero_tx();
+        let domain = safe_domain_separator(1, &[0xAA; 20]);
+        let hash = tx.signing_hash(&domain);
+        let sig1 = tx.sign(&s1, &domain).unwrap();
+        let sig2 = tx.sign(&s2, &domain).unwrap();
+
+        let packed = encode_signatures_sorted(&[sig1, sig2], &hash).unwrap();
+        assert_eq!(packed.len(), 130);
+
+        // Decode and verify sorted
+        let decoded = decode_signatures(&packed).unwrap();
+        let a1 = super::super::ecrecover_digest(&hash, &decoded[0]).unwrap();
+        let a2 = super::super::ecrecover_digest(&hash, &decoded[1]).unwrap();
+        assert!(a1 < a2);
+    }
+
     // ─── Signature Packing ────────────────────────────────────
 
     #[test]
@@ -558,9 +872,7 @@ mod tests {
     #[test]
     fn test_encode_signatures_single() {
         let sig = super::super::EthereumSignature {
-            r: [0xAA; 32],
-            s: [0xBB; 32],
-            v: 27,
+            r: [0xAA; 32], s: [0xBB; 32], v: 27,
         };
         let packed = encode_signatures(&[sig]);
         assert_eq!(packed.len(), 65);
@@ -621,7 +933,6 @@ mod tests {
             r: [0xAA; 32], s: [0xBB; 32], v: 27,
         };
         let calldata = tx.encode_exec_transaction(&[sig]);
-        // execTransaction selector
         let expected_selector = abi::function_selector(
             "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)",
         );
@@ -635,8 +946,78 @@ mod tests {
             r: [0xAA; 32], s: [0xBB; 32], v: 27,
         };
         let calldata = tx.encode_exec_transaction(&[sig]);
-        // The calldata should contain the packed signatures somewhere
-        assert!(calldata.len() > 4 + 10 * 32); // selector + 10 params
+        assert!(calldata.len() > 4 + 10 * 32);
+    }
+
+    // ─── approveHash ──────────────────────────────────────────
+
+    #[test]
+    fn test_encode_approve_hash_selector() {
+        let calldata = encode_approve_hash(&[0xAA; 32]);
+        let expected = abi::function_selector("approveHash(bytes32)");
+        assert_eq!(&calldata[..4], &expected);
+        assert_eq!(calldata.len(), 4 + 32);
+    }
+
+    #[test]
+    fn test_encode_approved_hashes_selector() {
+        let calldata = encode_approved_hashes([0xBB; 20], &[0xAA; 32]);
+        let expected = abi::function_selector("approvedHashes(address,bytes32)");
+        assert_eq!(&calldata[..4], &expected);
+        assert_eq!(calldata.len(), 4 + 2 * 32);
+    }
+
+    #[test]
+    fn test_pre_validated_signature() {
+        let owner = [0xAA; 20];
+        let sig = pre_validated_signature(owner);
+        assert_eq!(sig.v, 1);
+        assert_eq!(&sig.r[12..32], &owner);
+        assert_eq!(&sig.r[..12], &[0u8; 12]);
+        assert_eq!(sig.s, [0u8; 32]);
+    }
+
+    // ─── Contract Signature ───────────────────────────────────
+
+    #[test]
+    fn test_contract_signature() {
+        let contract = [0xCC; 20];
+        let sig = contract_signature(contract, 130);
+        assert_eq!(sig.v, 0);
+        assert_eq!(&sig.r[12..32], &contract);
+        assert_eq!(sig.s[28..32], 130u32.to_be_bytes());
+    }
+
+    // ─── Module Execution ─────────────────────────────────────
+
+    #[test]
+    fn test_encode_exec_from_module_selector() {
+        let calldata = encode_exec_from_module(
+            [0xBB; 20], &[0u8; 32], &[0xDE, 0xAD], Operation::Call,
+        );
+        let expected = abi::function_selector(
+            "execTransactionFromModule(address,uint256,bytes,uint8)",
+        );
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    #[test]
+    fn test_encode_exec_from_module_delegate_call() {
+        let calldata = encode_exec_from_module(
+            [0xBB; 20], &[0u8; 32], &[], Operation::DelegateCall,
+        );
+        assert!(calldata.len() > 4);
+    }
+
+    #[test]
+    fn test_encode_exec_from_module_return_data_selector() {
+        let calldata = encode_exec_from_module_return_data(
+            [0xBB; 20], &[0u8; 32], &[], Operation::Call,
+        );
+        let expected = abi::function_selector(
+            "execTransactionFromModuleReturnData(address,uint256,bytes,uint8)",
+        );
+        assert_eq!(&calldata[..4], &expected);
     }
 
     // ─── Owner Management Helpers ─────────────────────────────
@@ -727,6 +1108,61 @@ mod tests {
         assert_eq!(&calldata[..4], &expected);
     }
 
+    #[test]
+    fn test_encode_is_owner_selector() {
+        let calldata = encode_is_owner([0xAA; 20]);
+        let expected = abi::function_selector("isOwner(address)");
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    #[test]
+    fn test_encode_domain_separator_selector() {
+        let calldata = encode_domain_separator();
+        let expected = abi::function_selector("domainSeparator()");
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    #[test]
+    fn test_encode_is_module_enabled_selector() {
+        let calldata = encode_is_module_enabled([0xAA; 20]);
+        let expected = abi::function_selector("isModuleEnabled(address)");
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    #[test]
+    fn test_encode_get_modules_paginated_selector() {
+        let calldata = encode_get_modules_paginated(SENTINEL_OWNERS, 10);
+        let expected = abi::function_selector("getModulesPaginated(address,uint256)");
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    // ─── Deployment ───────────────────────────────────────────
+
+    #[test]
+    fn test_encode_setup_selector() {
+        let calldata = encode_setup(
+            &[[0xAA; 20], [0xBB; 20]],
+            2,
+            [0u8; 20],
+            &[],
+            [0xCC; 20],
+            [0u8; 20],
+            0,
+            [0u8; 20],
+        );
+        let expected = abi::function_selector(
+            "setup(address[],uint256,address,bytes,address,address,uint256,address)",
+        );
+        assert_eq!(&calldata[..4], &expected);
+    }
+
+    #[test]
+    fn test_encode_create_proxy_with_nonce_selector() {
+        let calldata = encode_create_proxy_with_nonce([0xAA; 20], &[0x01, 0x02], 42);
+        let expected = abi::function_selector("createProxyWithNonce(address,bytes,uint256)");
+        assert_eq!(&calldata[..4], &expected);
+    }
+
     // ─── Sentinel ─────────────────────────────────────────────
 
     #[test]
@@ -773,7 +1209,7 @@ mod tests {
         assert_eq!(&padded[24..], &256u64.to_be_bytes());
     }
 
-    // ─── Delegate Call Transaction ────────────────────────────
+    // ─── Delegate Call ────────────────────────────────────────
 
     #[test]
     fn test_delegate_call_transaction() {
@@ -783,5 +1219,43 @@ mod tests {
         let domain = safe_domain_separator(1, &[0xAA; 20]);
         let hash = tx.signing_hash(&domain);
         assert_ne!(hash, [0u8; 32]);
+    }
+
+    // ─── Full Multi-Owner Flow ────────────────────────────────
+
+    #[test]
+    fn test_full_2_of_3_signing_flow() {
+        // 3 owners, 2-of-3 threshold
+        let o1 = super::super::EthereumSigner::generate().unwrap();
+        let o2 = super::super::EthereumSigner::generate().unwrap();
+        let o3 = super::super::EthereumSigner::generate().unwrap();
+
+        let domain = safe_domain_separator(1, &[0xAA; 20]);
+        let tx = zero_tx();
+
+        // Only 2 sign
+        let sorted = sign_and_sort(&tx, &[&o1, &o3], &domain).unwrap();
+        assert_eq!(sorted.len(), 2);
+
+        // Build exec calldata
+        let calldata = tx.encode_exec_transaction(&sorted);
+        assert!(calldata.len() > 4 + 10 * 32 + 2 * 65);
+    }
+
+    // ─── Mixed Signature Types ────────────────────────────────
+
+    #[test]
+    fn test_mixed_ecdsa_and_prevalidated() {
+        let signer = super::super::EthereumSigner::generate().unwrap();
+        let tx = zero_tx();
+        let domain = safe_domain_separator(1, &[0xAA; 20]);
+        let ecdsa_sig = tx.sign(&signer, &domain).unwrap();
+        let pre_sig = pre_validated_signature([0x01; 20]);
+
+        let packed = encode_signatures(&[pre_sig, ecdsa_sig]);
+        assert_eq!(packed.len(), 2 * 65);
+
+        // First sig should be v=1 (pre-validated)
+        assert_eq!(packed[64], 1);
     }
 }
