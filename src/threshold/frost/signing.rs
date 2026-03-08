@@ -4,7 +4,7 @@
 //! contextString = "FROST-secp256k1-SHA256-v1"
 
 use crate::error::SignerError;
-use crate::frost::keygen::{derive_interpolating_value, KeyPackage};
+use crate::threshold::frost::keygen::{derive_interpolating_value, KeyPackage};
 #[allow(unused_imports)]
 use k256::elliptic_curve::group::GroupEncoding;
 use k256::elliptic_curve::ops::Reduce;
@@ -221,8 +221,8 @@ fn scalar_from_wide(bytes: &[u8; 48]) -> Scalar {
 /// Each participant calls this once per signing session.
 /// The secret nonces MUST NOT be reused across sessions.
 pub fn commit(key_package: &KeyPackage) -> Result<SigningNonces, SignerError> {
-    let hiding = crate::frost::keygen::random_scalar()?;
-    let binding = crate::frost::keygen::random_scalar()?;
+    let hiding = crate::threshold::frost::keygen::random_scalar()?;
+    let binding = crate::threshold::frost::keygen::random_scalar()?;
 
     let hiding_commitment = (ProjectivePoint::GENERATOR * hiding).to_affine();
     let binding_commitment = (ProjectivePoint::GENERATOR * binding).to_affine();
