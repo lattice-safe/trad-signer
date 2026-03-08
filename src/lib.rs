@@ -10,6 +10,8 @@
 
 pub mod error;
 pub mod traits;
+pub mod crypto;
+pub mod encoding;
 
 #[cfg(feature = "serde")]
 pub(crate) mod serde_zeroizing;
@@ -40,12 +42,6 @@ pub mod mnemonic;
 
 #[cfg(feature = "bip85")]
 pub mod bip85;
-
-#[cfg(feature = "psbt")]
-pub mod psbt;
-
-#[cfg(feature = "descriptor")]
-pub mod descriptor;
 
 #[cfg(any(feature = "frost", feature = "musig2"))]
 pub mod threshold;

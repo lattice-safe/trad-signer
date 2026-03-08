@@ -21,32 +21,22 @@ default = [
     "hd_key",
     "mnemonic",
     "bip85",
-    "psbt",
-    "descriptor",
     "frost",
     "musig2",
 ]
 std = []
 serde = ["dep:serde", "k256/serde", "p256/serde"]
 ethereum = ["dep:k256", "dep:sha3"]
-bitcoin = ["dep:k256", "dep:sha2", "dep:ripemd"]
+bitcoin = ["dep:k256"]
 solana = ["dep:ed25519-dalek", "dep:rand_core"]
-xrp = [
-    "dep:k256",
-    "dep:ed25519-dalek",
-    "dep:sha2",
-    "dep:ripemd",
-    "dep:rand_core",
-]
-neo = ["dep:p256", "dep:sha2", "dep:ripemd"]
+xrp = ["dep:k256", "dep:ed25519-dalek", "dep:rand_core"]
+neo = ["dep:p256"]
 bls = ["dep:blst"]
-hd_key = ["dep:k256", "dep:sha2", "dep:hmac", "dep:ripemd"]
-mnemonic = ["dep:sha2", "dep:hmac", "dep:pbkdf2", "hd_key"]
-frost = ["dep:k256", "dep:sha2"]
-musig2 = ["dep:k256", "dep:sha2"]
-bip85 = ["hd_key", "dep:sha2", "dep:hmac"]
-psbt = ["dep:sha2"]
-descriptor = ["dep:sha2", "dep:ripemd"]
+hd_key = ["dep:k256", "dep:hmac"]
+mnemonic = ["dep:hmac", "dep:pbkdf2", "hd_key"]
+frost = ["dep:k256"]
+musig2 = ["dep:k256"]
+bip85 = ["hd_key", "dep:hmac"]
 
 [dependencies]
 # ECDSA curves
@@ -65,9 +55,9 @@ ed25519-dalek = { version = "2.1", features = ["rand_core"], optional = true }
 blst = { version = "0.3", optional = true }
 
 # Hash functions
-sha2 = { version = "0.10", optional = true }
+sha2 = "0.10"
 sha3 = { version = "0.10", optional = true }
-ripemd = { version = "0.1", optional = true }
+ripemd = "0.1"
 hmac = { version = "0.12", optional = true }
 pbkdf2 = { version = "0.12", features = ["hmac"], optional = true }
 
@@ -79,6 +69,7 @@ getrandom = "0.2"
 # Address encoding
 bs58 = "0.5"
 bech32 = "0.11"
+hex = "0.4"
 
 # Entropy
 rand_core = { version = "0.6", features = ["getrandom"], optional = true }
@@ -90,7 +81,6 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [dev-dependencies]
-hex = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
 sha3 = "0.10"
 

@@ -15,22 +15,9 @@
 //! let merkle_root = tree.merkle_root();
 //! ```
 
-use sha2::{Digest, Sha256};
-
-// ─── Tagged Hashing (BIP-340 style) ─────────────────────────────────
-
-/// BIP-340 tagged hash: `SHA256(SHA256(tag) || SHA256(tag) || data)`.
-fn tagged_hash(tag: &[u8], data: &[u8]) -> [u8; 32] {
-    let tag_hash = Sha256::digest(tag);
-    let mut h = Sha256::new();
-    h.update(tag_hash);
-    h.update(tag_hash);
-    h.update(data);
-    let result = h.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
-}
+use crate::crypto::tagged_hash;
+use crate::encoding;
+use crate::error::SignerError;
 
 // ─── TapLeaf ────────────────────────────────────────────────────────
 
@@ -61,7 +48,7 @@ impl TapLeaf {
     pub fn leaf_hash(&self) -> [u8; 32] {
         let mut data = Vec::new();
         data.push(self.version);
-        encode_compact_size(&mut data, self.script.len() as u64);
+        encoding::encode_compact_size(&mut data, self.script.len() as u64);
         data.extend_from_slice(&self.script);
         tagged_hash(b"TapLeaf", &data)
     }
@@ -355,33 +342,12 @@ pub fn taproot_address(
     internal_key: &[u8; 32],
     tree: Option<&TapTree>,
     hrp: &str,
-) -> Result<String, String> {
+) -> Result<String, SignerError> {
     let (output_key, _parity) = taproot_output_key(internal_key, tree);
-
-    // Encode as Bech32m (witness version 1) using bech32 0.11 API
-    use bech32::Hrp;
-    let hrp = Hrp::parse(hrp).map_err(|e| format!("invalid hrp: {e}"))?;
-    let version = bech32::Fe32::try_from(1u8).map_err(|e| format!("version: {e}"))?;
-    bech32::segwit::encode(hrp, version, &output_key).map_err(|e| format!("encode: {e}"))
+    encoding::bech32_encode(hrp, 1, &output_key)
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
 
-/// Encode a compact size (Bitcoin VarInt).
-fn encode_compact_size(buf: &mut Vec<u8>, value: u64) {
-    if value < 0xFD {
-        buf.push(value as u8);
-    } else if value <= 0xFFFF {
-        buf.push(0xFD);
-        buf.extend_from_slice(&(value as u16).to_le_bytes());
-    } else if value <= 0xFFFF_FFFF {
-        buf.push(0xFE);
-        buf.extend_from_slice(&(value as u32).to_le_bytes());
-    } else {
-        buf.push(0xFF);
-        buf.extend_from_slice(&value.to_le_bytes());
-    }
-}
 
 // ─── Tests ──────────────────────────────────────────────────────────
 

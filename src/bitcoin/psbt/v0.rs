@@ -3,7 +3,9 @@
 //! Implements serialization, deserialization, input/output maps, and
 //! key-value encoding for Partially Signed Bitcoin Transactions.
 
-use sha2::{Digest, Sha256};
+use crate::crypto;
+use crate::encoding;
+use crate::error::SignerError;
 use std::collections::BTreeMap;
 
 /// PSBT magic bytes: `0x70736274` ("psbt" in ASCII).
@@ -157,7 +159,7 @@ impl Psbt {
     pub fn set_witness_utxo(&mut self, input_idx: usize, amount: u64, script_pubkey: &[u8]) {
         let mut value = Vec::new();
         value.extend_from_slice(&amount.to_le_bytes());
-        encode_compact_size(&mut value, script_pubkey.len() as u64);
+        encoding::encode_compact_size(&mut value, script_pubkey.len() as u64);
         value.extend_from_slice(script_pubkey);
         self.set_input_kv(input_idx, vec![InputKey::WitnessUtxo as u8], value);
     }
@@ -197,9 +199,9 @@ impl Psbt {
 
         // Global map
         for (key, value) in &self.global {
-            encode_compact_size(&mut data, key.len() as u64);
+            encoding::encode_compact_size(&mut data, key.len() as u64);
             data.extend_from_slice(key);
-            encode_compact_size(&mut data, value.len() as u64);
+            encoding::encode_compact_size(&mut data, value.len() as u64);
             data.extend_from_slice(value);
         }
         data.push(0x00); // end of global map
@@ -207,9 +209,9 @@ impl Psbt {
         // Input maps
         for input in &self.inputs {
             for (key, value) in input {
-                encode_compact_size(&mut data, key.len() as u64);
+                encoding::encode_compact_size(&mut data, key.len() as u64);
                 data.extend_from_slice(key);
-                encode_compact_size(&mut data, value.len() as u64);
+                encoding::encode_compact_size(&mut data, value.len() as u64);
                 data.extend_from_slice(value);
             }
             data.push(0x00); // end of input map
@@ -218,9 +220,9 @@ impl Psbt {
         // Output maps
         for output in &self.outputs {
             for (key, value) in output {
-                encode_compact_size(&mut data, key.len() as u64);
+                encoding::encode_compact_size(&mut data, key.len() as u64);
                 data.extend_from_slice(key);
-                encode_compact_size(&mut data, value.len() as u64);
+                encoding::encode_compact_size(&mut data, value.len() as u64);
                 data.extend_from_slice(value);
             }
             data.push(0x00); // end of output map
@@ -230,15 +232,15 @@ impl Psbt {
     }
 
     /// Deserialize a PSBT from binary format.
-    pub fn deserialize(data: &[u8]) -> Result<Self, String> {
+    pub fn deserialize(data: &[u8]) -> Result<Self, SignerError> {
         if data.len() < 5 {
-            return Err("PSBT too short".into());
+            return Err(SignerError::ParseError("PSBT too short".into()));
         }
         if data[..4] != PSBT_MAGIC {
-            return Err("invalid PSBT magic".into());
+            return Err(SignerError::ParseError("invalid PSBT magic".into()));
         }
         if data[4] != PSBT_SEPARATOR {
-            return Err("missing PSBT separator".into());
+            return Err(SignerError::ParseError("missing PSBT separator".into()));
         }
 
         let mut offset = 5;
@@ -284,10 +286,7 @@ impl Psbt {
     /// Compute the PSBT ID (SHA256 of the serialized PSBT).
     pub fn psbt_id(&self) -> [u8; 32] {
         let serialized = self.serialize();
-        let result = Sha256::digest(&serialized);
-        let mut id = [0u8; 32];
-        id.copy_from_slice(&result);
-        id
+        crypto::sha256(&serialized)
     }
 }
 
@@ -300,7 +299,7 @@ impl Default for Psbt {
 // ─── Parsing Helpers ────────────────────────────────────────────────
 
 /// Parse a key-value map from PSBT binary data.
-fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, String> {
+fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, SignerError> {
     let mut map = BTreeMap::new();
 
     loop {
@@ -309,7 +308,7 @@ fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec
         }
 
         // Read key length
-        let key_len = read_compact_size(data, offset)?;
+        let key_len = encoding::read_compact_size(data, offset)?;
         if key_len == 0 {
             // End of map
             return Ok(map);
@@ -318,18 +317,18 @@ fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec
         // Read key
         let end = *offset + key_len as usize;
         if end > data.len() {
-            return Err("PSBT key truncated".into());
+            return Err(SignerError::ParseError("PSBT key truncated".into()));
         }
         let key = data[*offset..end].to_vec();
         *offset = end;
 
         // Read value length
-        let val_len = read_compact_size(data, offset)?;
+        let val_len = encoding::read_compact_size(data, offset)?;
 
         // Read value
         let end = *offset + val_len as usize;
         if end > data.len() {
-            return Err("PSBT value truncated".into());
+            return Err(SignerError::ParseError("PSBT value truncated".into()));
         }
         let value = data[*offset..end].to_vec();
         *offset = end;
@@ -338,59 +337,6 @@ fn parse_kv_map(data: &[u8], offset: &mut usize) -> Result<BTreeMap<Vec<u8>, Vec
     }
 }
 
-/// Read a Bitcoin compact size integer.
-fn read_compact_size(data: &[u8], offset: &mut usize) -> Result<u64, String> {
-    if *offset >= data.len() {
-        return Err("compact size: unexpected EOF".into());
-    }
-    let first = data[*offset];
-    *offset += 1;
-    match first {
-        0x00..=0xFC => Ok(first as u64),
-        0xFD => {
-            if *offset + 2 > data.len() {
-                return Err("compact size: truncated u16".into());
-            }
-            let val = u16::from_le_bytes([data[*offset], data[*offset + 1]]);
-            *offset += 2;
-            Ok(val as u64)
-        }
-        0xFE => {
-            if *offset + 4 > data.len() {
-                return Err("compact size: truncated u32".into());
-            }
-            let mut buf = [0u8; 4];
-            buf.copy_from_slice(&data[*offset..*offset + 4]);
-            *offset += 4;
-            Ok(u32::from_le_bytes(buf) as u64)
-        }
-        0xFF => {
-            if *offset + 8 > data.len() {
-                return Err("compact size: truncated u64".into());
-            }
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&data[*offset..*offset + 8]);
-            *offset += 8;
-            Ok(u64::from_le_bytes(buf))
-        }
-    }
-}
-
-/// Encode a compact size integer.
-fn encode_compact_size(buf: &mut Vec<u8>, value: u64) {
-    if value < 0xFD {
-        buf.push(value as u8);
-    } else if value <= 0xFFFF {
-        buf.push(0xFD);
-        buf.extend_from_slice(&(value as u16).to_le_bytes());
-    } else if value <= 0xFFFF_FFFF {
-        buf.push(0xFE);
-        buf.extend_from_slice(&(value as u32).to_le_bytes());
-    } else {
-        buf.push(0xFF);
-        buf.extend_from_slice(&value.to_le_bytes());
-    }
-}
 
 // ─── Tests ──────────────────────────────────────────────────────────
 
@@ -513,9 +459,9 @@ mod tests {
     fn test_compact_size_roundtrip() {
         for val in [0u64, 1, 252, 253, 0xFFFF, 0x10000, 0xFFFFFFFF, 0x100000000] {
             let mut buf = Vec::new();
-            encode_compact_size(&mut buf, val);
+            encoding::encode_compact_size(&mut buf, val);
             let mut offset = 0;
-            let parsed = read_compact_size(&buf, &mut offset).expect("valid");
+            let parsed = encoding::read_compact_size(&buf, &mut offset).expect("valid");
             assert_eq!(parsed, val, "failed for value {val}");
         }
     }

@@ -11,7 +11,8 @@
 //! assert_eq!(hex::encode(hash), "f0eb03b1a75ac6d9847f55c624a99169b5dccba2a31f5b23bea77ba270de0a7a");
 //! ```
 
-use sha2::{Digest, Sha256};
+use crate::crypto;
+use crate::encoding;
 
 /// BIP-322 tagged hash tag for message hashing.
 const BIP322_TAG: &[u8] = b"BIP0322-signed-message";
@@ -24,15 +25,7 @@ const BIP322_TAG: &[u8] = b"BIP0322-signed-message";
 ///
 /// This is the BIP-340 tagged hash with tag `"BIP0322-signed-message"`.
 pub fn message_hash(message: &[u8]) -> [u8; 32] {
-    let tag_hash = Sha256::digest(BIP322_TAG);
-    let mut h = Sha256::new();
-    h.update(tag_hash);
-    h.update(tag_hash);
-    h.update(message);
-    let result = h.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
+    crypto::tagged_hash(BIP322_TAG, message)
 }
 
 // ─── Virtual Transaction Construction ───────────────────────────────
@@ -78,7 +71,7 @@ pub fn create_to_spend_tx(script_pubkey: &[u8], message: &[u8]) -> Vec<u8> {
     tx.extend_from_slice(&0u64.to_le_bytes());
 
     // Output: scriptPubKey
-    encode_varint(&mut tx, script_pubkey.len() as u64);
+    encoding::encode_compact_size(&mut tx, script_pubkey.len() as u64);
     tx.extend_from_slice(script_pubkey);
 
     // Locktime (0)
@@ -140,30 +133,13 @@ pub fn create_to_sign_tx(to_spend_txid: &[u8; 32]) -> Vec<u8> {
 
 /// Compute the txid (double SHA256, reversed) of a raw transaction.
 pub fn compute_txid(raw_tx: &[u8]) -> [u8; 32] {
-    let hash1 = Sha256::digest(raw_tx);
-    let hash2 = Sha256::digest(hash1);
-    let mut txid = [0u8; 32];
-    txid.copy_from_slice(&hash2);
+    let mut txid = crypto::double_sha256(raw_tx);
     // txid is displayed reversed (little-endian)
     txid.reverse();
     txid
 }
 
-/// Encode a VarInt (Bitcoin compact size).
-fn encode_varint(buf: &mut Vec<u8>, value: u64) {
-    if value < 0xFD {
-        buf.push(value as u8);
-    } else if value <= 0xFFFF {
-        buf.push(0xFD);
-        buf.extend_from_slice(&(value as u16).to_le_bytes());
-    } else if value <= 0xFFFF_FFFF {
-        buf.push(0xFE);
-        buf.extend_from_slice(&(value as u32).to_le_bytes());
-    } else {
-        buf.push(0xFF);
-        buf.extend_from_slice(&value.to_le_bytes());
-    }
-}
+
 
 /// Create a P2WPKH scriptPubKey from a 20-byte pubkey hash.
 ///
@@ -288,19 +264,19 @@ mod tests {
     #[test]
     fn test_bip322_varint_encoding() {
         let mut buf = Vec::new();
-        encode_varint(&mut buf, 0);
+        encoding::encode_compact_size(&mut buf, 0);
         assert_eq!(buf, vec![0x00]);
 
         buf.clear();
-        encode_varint(&mut buf, 252);
+        encoding::encode_compact_size(&mut buf, 252);
         assert_eq!(buf, vec![0xFC]);
 
         buf.clear();
-        encode_varint(&mut buf, 253);
+        encoding::encode_compact_size(&mut buf, 253);
         assert_eq!(buf, vec![0xFD, 0xFD, 0x00]);
 
         buf.clear();
-        encode_varint(&mut buf, 0x1234);
+        encoding::encode_compact_size(&mut buf, 0x1234);
         assert_eq!(buf, vec![0xFD, 0x34, 0x12]);
     }
 

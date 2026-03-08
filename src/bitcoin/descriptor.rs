@@ -5,14 +5,16 @@
 //!
 //! # Example
 //! ```ignore
-//! use trad_signer::descriptor::{Descriptor, DescriptorKey};
+//! use trad_signer::bitcoin::descriptor::{Descriptor, DescriptorKey};
 //!
 //! let key = DescriptorKey::from_hex("0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")?;
 //! let desc = Descriptor::wpkh(key);
 //! println!("Address: {}", desc.address("bc")?);
 //! ```
 
-use sha2::{Digest, Sha256};
+use crate::crypto;
+use crate::encoding;
+use crate::error::SignerError;
 
 // ─── Descriptor Key ─────────────────────────────────────────────────
 
@@ -27,8 +29,9 @@ pub enum DescriptorKey {
 
 impl DescriptorKey {
     /// Parse a hex-encoded public key.
-    pub fn from_hex(hex: &str) -> Result<Self, String> {
-        let bytes = hex_decode(hex)?;
+    pub fn from_hex(hex_str: &str) -> Result<Self, SignerError> {
+        let bytes = hex::decode(hex_str)
+            .map_err(|e| SignerError::ParseError(format!("hex: {e}")))?;
         match bytes.len() {
             33 => {
                 let mut key = [0u8; 33];
@@ -40,7 +43,10 @@ impl DescriptorKey {
                 key.copy_from_slice(&bytes);
                 Ok(DescriptorKey::XOnly(key))
             }
-            _ => Err(format!("invalid key length: {}", bytes.len())),
+            _ => Err(SignerError::ParseError(format!(
+                "invalid key length: {}",
+                bytes.len()
+            ))),
         }
     }
 
@@ -63,14 +69,7 @@ impl DescriptorKey {
     /// Calculate HASH160 of the compressed key (for P2PKH / P2WPKH).
     pub fn hash160(&self) -> Option<[u8; 20]> {
         match self {
-            DescriptorKey::Compressed(key) => {
-                use ripemd::Ripemd160;
-                let sha = Sha256::digest(key);
-                let ripe = Ripemd160::digest(sha);
-                let mut hash = [0u8; 20];
-                hash.copy_from_slice(&ripe);
-                Some(hash)
-            }
+            DescriptorKey::Compressed(key) => Some(crypto::hash160(key)),
             DescriptorKey::XOnly(_) => None,
         }
     }
@@ -117,10 +116,12 @@ impl Descriptor {
     }
 
     /// Compute the scriptPubKey for this descriptor.
-    pub fn script_pubkey(&self) -> Result<Vec<u8>, String> {
+    pub fn script_pubkey(&self) -> Result<Vec<u8>, SignerError> {
         match self {
             Descriptor::Pkh(key) => {
-                let hash = key.hash160().ok_or("pkh requires compressed key")?;
+                let hash = key
+                    .hash160()
+                    .ok_or(SignerError::ParseError("pkh requires compressed key".into()))?;
                 // OP_DUP OP_HASH160 OP_PUSH20 <hash> OP_EQUALVERIFY OP_CHECKSIG
                 let mut script = Vec::with_capacity(25);
                 script.push(0x76); // OP_DUP
@@ -132,7 +133,9 @@ impl Descriptor {
                 Ok(script)
             }
             Descriptor::Wpkh(key) => {
-                let hash = key.hash160().ok_or("wpkh requires compressed key")?;
+                let hash = key
+                    .hash160()
+                    .ok_or(SignerError::ParseError("wpkh requires compressed key".into()))?;
                 // OP_0 OP_PUSH20 <hash>
                 let mut script = Vec::with_capacity(22);
                 script.push(0x00); // OP_0
@@ -141,20 +144,20 @@ impl Descriptor {
                 Ok(script)
             }
             Descriptor::ShWpkh(key) => {
-                let hash = key.hash160().ok_or("sh(wpkh) requires compressed key")?;
+                let hash = key.hash160().ok_or(SignerError::ParseError(
+                    "sh(wpkh) requires compressed key".into(),
+                ))?;
                 // Witness script: OP_0 OP_PUSH20 <hash>
                 let mut witness_script = Vec::with_capacity(22);
                 witness_script.push(0x00);
                 witness_script.push(0x14);
                 witness_script.extend_from_slice(&hash);
                 // P2SH: OP_HASH160 OP_PUSH20 HASH160(witness_script) OP_EQUAL
-                use ripemd::Ripemd160;
-                let sha = Sha256::digest(&witness_script);
-                let ripe = Ripemd160::digest(sha);
+                let script_hash = crypto::hash160(&witness_script);
                 let mut script = Vec::with_capacity(23);
                 script.push(0xa9); // OP_HASH160
                 script.push(0x14); // OP_PUSH20
-                script.extend_from_slice(&ripe);
+                script.extend_from_slice(&script_hash);
                 script.push(0x87); // OP_EQUAL
                 Ok(script)
             }
@@ -167,27 +170,11 @@ impl Descriptor {
                         xonly
                     }
                 };
-                // OP_1 OP_PUSH32 <tweaked_x_only>
-                // For key-path-only, compute TapTweak
-                let tag_hash = Sha256::digest(b"TapTweak");
-                let mut h = Sha256::new();
-                h.update(tag_hash);
-                h.update(tag_hash);
-                h.update(xonly);
-                let tweak = h.finalize();
-
-                // Simple scalar addition would require full curve ops; for descriptor 
-                // purposes, we use the tweaked key logic from taproot module.
-                // For now, output the raw x-only key (key-path-only without tweak
-                // is valid for display purposes when the tweaked key is computed externally).
+                // OP_1 OP_PUSH32 <x_only_key>
                 let mut script = Vec::with_capacity(34);
                 script.push(0x51); // OP_1
                 script.push(0x20); // OP_PUSH32
                 script.extend_from_slice(&xonly);
-
-                // Store tweak for reference
-                let _ = tweak;
-
                 Ok(script)
             }
             Descriptor::Raw(script) => Ok(script.clone()),
@@ -204,48 +191,34 @@ impl Descriptor {
     }
 
     /// Generate the Bitcoin address for this descriptor.
-    pub fn address(&self, hrp: &str) -> Result<String, String> {
+    pub fn address(&self, hrp: &str) -> Result<String, SignerError> {
         match self {
             Descriptor::Pkh(key) => {
-                let hash = key.hash160().ok_or("pkh requires compressed key")?;
-                // Base58Check: version_byte || hash || checksum
+                let hash = key
+                    .hash160()
+                    .ok_or(SignerError::ParseError("pkh requires compressed key".into()))?;
                 let prefix = if hrp == "bc" || hrp == "mainnet" {
                     0x00u8
                 } else {
                     0x6Fu8
                 };
-                let mut payload = vec![prefix];
-                payload.extend_from_slice(&hash);
-                let c1 = Sha256::digest(&payload);
-                let c2 = Sha256::digest(c1);
-                payload.extend_from_slice(&c2[..4]);
-                Ok(bs58::encode(&payload).into_string())
+                Ok(encoding::base58check_encode(prefix, &hash))
             }
             Descriptor::Wpkh(key) => {
-                let hash = key.hash160().ok_or("wpkh requires compressed key")?;
-                // Bech32 witness version 0
-                use bech32::Hrp;
-                let hrp_parsed = Hrp::parse(hrp).map_err(|e| format!("hrp: {e}"))?;
-                let version = bech32::Fe32::try_from(0u8).map_err(|e| format!("version: {e}"))?;
-                bech32::segwit::encode(hrp_parsed, version, &hash).map_err(|e| format!("encode: {e}"))
+                let hash = key
+                    .hash160()
+                    .ok_or(SignerError::ParseError("wpkh requires compressed key".into()))?;
+                encoding::bech32_encode(hrp, 0, &hash)
             }
-            Descriptor::ShWpkh(_key) => {
+            Descriptor::ShWpkh(_) => {
                 let script = self.script_pubkey()?;
-                // The P2SH address is Base58Check of the HASH160 of the redeemScript
-                // But the script_pubkey IS already the P2SH scriptPubKey.
-                // Extract the hash from it (bytes 2..22)
                 let hash = &script[2..22];
                 let prefix = if hrp == "bc" || hrp == "mainnet" {
                     0x05u8
                 } else {
                     0xC4u8
                 };
-                let mut payload = vec![prefix];
-                payload.extend_from_slice(hash);
-                let c1 = Sha256::digest(&payload);
-                let c2 = Sha256::digest(c1);
-                payload.extend_from_slice(&c2[..4]);
-                Ok(bs58::encode(&payload).into_string())
+                Ok(encoding::base58check_encode(prefix, hash))
             }
             Descriptor::Tr(key) => {
                 let xonly = match key {
@@ -256,14 +229,11 @@ impl Descriptor {
                         xo
                     }
                 };
-                use bech32::Hrp;
-                let hrp_parsed = Hrp::parse(hrp).map_err(|e| format!("hrp: {e}"))?;
-                let version = bech32::Fe32::try_from(1u8).map_err(|e| format!("version: {e}"))?;
-                bech32::segwit::encode(hrp_parsed, version, &xonly).map_err(|e| format!("encode: {e}"))
+                encoding::bech32_encode(hrp, 1, &xonly)
             }
-            Descriptor::Raw(_) | Descriptor::OpReturn(_) => {
-                Err("raw/op_return descriptors have no address".into())
-            }
+            Descriptor::Raw(_) | Descriptor::OpReturn(_) => Err(SignerError::EncodingError(
+                "raw/op_return descriptors have no address".into(),
+            )),
         }
     }
 
@@ -274,8 +244,8 @@ impl Descriptor {
             Descriptor::Wpkh(key) => format!("wpkh({})", key_to_hex(key)),
             Descriptor::ShWpkh(key) => format!("sh(wpkh({}))", key_to_hex(key)),
             Descriptor::Tr(key) => format!("tr({})", key_to_hex(key)),
-            Descriptor::Raw(script) => format!("raw({})", hex_encode(script)),
-            Descriptor::OpReturn(data) => format!("raw(6a{})", hex_encode(data)),
+            Descriptor::Raw(script) => format!("raw({})", hex::encode(script)),
+            Descriptor::OpReturn(data) => format!("raw(6a{})", hex::encode(data)),
         }
     }
 
@@ -298,7 +268,7 @@ impl Descriptor {
 /// Parse a descriptor string.
 ///
 /// Supports `pkh(KEY)`, `wpkh(KEY)`, `sh(wpkh(KEY))`, `tr(KEY)`.
-pub fn parse(descriptor: &str) -> Result<Descriptor, String> {
+pub fn parse(descriptor: &str) -> Result<Descriptor, SignerError> {
     // Strip checksum
     let desc = if let Some(pos) = descriptor.find('#') {
         &descriptor[..pos]
@@ -319,10 +289,13 @@ pub fn parse(descriptor: &str) -> Result<Descriptor, String> {
         let key = DescriptorKey::from_hex(inner)?;
         Ok(Descriptor::tr(key))
     } else if let Some(inner) = strip_wrapper(desc, "raw(", ")") {
-        let bytes = hex_decode(inner)?;
+        let bytes =
+            hex::decode(inner).map_err(|e| SignerError::ParseError(format!("hex: {e}")))?;
         Ok(Descriptor::Raw(bytes))
     } else {
-        Err(format!("unsupported descriptor: {desc}"))
+        Err(SignerError::ParseError(format!(
+            "unsupported descriptor: {desc}"
+        )))
     }
 }
 
@@ -343,11 +316,21 @@ fn descriptor_checksum(desc: &str) -> String {
     fn polymod(c: u64, val: u64) -> u64 {
         let c0 = c >> 35;
         let mut c = ((c & 0x7FFFFFFFF) << 5) ^ val;
-        if c0 & 1 != 0 { c ^= 0xf5dee51989; }
-        if c0 & 2 != 0 { c ^= 0xa9fdca3312; }
-        if c0 & 4 != 0 { c ^= 0x1bab10e32d; }
-        if c0 & 8 != 0 { c ^= 0x3706b1677a; }
-        if c0 & 16 != 0 { c ^= 0x644d626ffd; }
+        if c0 & 1 != 0 {
+            c ^= 0xf5dee51989;
+        }
+        if c0 & 2 != 0 {
+            c ^= 0xa9fdca3312;
+        }
+        if c0 & 4 != 0 {
+            c ^= 0x1bab10e32d;
+        }
+        if c0 & 8 != 0 {
+            c ^= 0x3706b1677a;
+        }
+        if c0 & 16 != 0 {
+            c ^= 0x644d626ffd;
+        }
         c
     }
 
@@ -382,29 +365,12 @@ fn descriptor_checksum(desc: &str) -> String {
     result
 }
 
-// ─── Hex Helpers ────────────────────────────────────────────────────
-
-fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    if s.len() % 2 != 0 {
-        return Err("invalid hex length".into());
-    }
-    let mut bytes = Vec::with_capacity(s.len() / 2);
-    for i in (0..s.len()).step_by(2) {
-        let byte = u8::from_str_radix(&s[i..i + 2], 16)
-            .map_err(|_| format!("invalid hex at position {i}"))?;
-        bytes.push(byte);
-    }
-    Ok(bytes)
-}
-
-fn hex_encode(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{b:02x}")).collect()
-}
+// ─── Helpers ────────────────────────────────────────────────────────
 
 fn key_to_hex(key: &DescriptorKey) -> String {
     match key {
-        DescriptorKey::Compressed(k) => hex_encode(k),
-        DescriptorKey::XOnly(k) => hex_encode(k),
+        DescriptorKey::Compressed(k) => hex::encode(k),
+        DescriptorKey::XOnly(k) => hex::encode(k),
     }
 }
 
@@ -443,6 +409,18 @@ mod tests {
     }
 
     #[test]
+    fn test_descriptor_key_hash160() {
+        let key = test_key();
+        let h = key.hash160().expect("compressed key");
+        assert_eq!(h.len(), 20);
+        // Generator point HASH160 is well-known
+        assert_eq!(
+            hex::encode(h),
+            "751e76e8199196d454941c45d1b3a323f1433bd6"
+        );
+    }
+
+    #[test]
     fn test_descriptor_pkh_script_pubkey() {
         let key = test_key();
         let desc = Descriptor::pkh(key);
@@ -450,6 +428,8 @@ mod tests {
         assert_eq!(script.len(), 25);
         assert_eq!(script[0], 0x76); // OP_DUP
         assert_eq!(script[1], 0xa9); // OP_HASH160
+        assert_eq!(script[2], 0x14); // OP_PUSH20
+        assert_eq!(script[23], 0x88); // OP_EQUALVERIFY
         assert_eq!(script[24], 0xac); // OP_CHECKSIG
     }
 
@@ -470,6 +450,7 @@ mod tests {
         let script = desc.script_pubkey().expect("ok");
         assert_eq!(script.len(), 23);
         assert_eq!(script[0], 0xa9); // OP_HASH160
+        assert_eq!(script[1], 0x14); // OP_PUSH20
         assert_eq!(script[22], 0x87); // OP_EQUAL
     }
 
@@ -487,19 +468,22 @@ mod tests {
     }
 
     #[test]
-    fn test_descriptor_pkh_address() {
+    fn test_descriptor_pkh_address_mainnet() {
         let key = test_key();
         let desc = Descriptor::pkh(key);
         let addr = desc.address("bc").expect("ok");
-        assert!(addr.starts_with('1'));
+        // Generator point P2PKH address
+        assert_eq!(addr, "1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH");
     }
 
     #[test]
-    fn test_descriptor_wpkh_address() {
+    fn test_descriptor_wpkh_address_mainnet() {
         let key = test_key();
         let desc = Descriptor::wpkh(key);
         let addr = desc.address("bc").expect("ok");
         assert!(addr.starts_with("bc1q"));
+        // Generator point P2WPKH address
+        assert_eq!(addr, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
     }
 
     #[test]
@@ -547,6 +531,12 @@ mod tests {
     }
 
     #[test]
+    fn test_descriptor_parse_raw() {
+        let desc = parse("raw(6a0568656c6c6f)").expect("ok");
+        assert!(matches!(desc, Descriptor::Raw(_)));
+    }
+
+    #[test]
     fn test_descriptor_parse_with_checksum() {
         let desc_str = format!("pkh({TEST_PUBKEY})#something");
         let desc = parse(&desc_str).expect("ok");
@@ -559,20 +549,20 @@ mod tests {
     }
 
     #[test]
-    fn test_descriptor_to_string() {
+    fn test_descriptor_to_string_roundtrip() {
         let key = test_key();
         let desc = Descriptor::pkh(key);
         let s = desc.to_string_repr();
-        assert!(s.starts_with("pkh("));
+        let reparsed = parse(&s).expect("roundtrip");
+        assert!(matches!(reparsed, Descriptor::Pkh(_)));
     }
 
     #[test]
-    fn test_descriptor_checksum() {
+    fn test_descriptor_checksum_length() {
         let key = test_key();
         let desc = Descriptor::pkh(key);
         let cs = desc.checksum();
         assert_eq!(cs.len(), 8);
-        // Should be alphanumeric
         assert!(cs.chars().all(|c| c.is_alphanumeric()));
     }
 
@@ -590,19 +580,28 @@ mod tests {
     #[test]
     fn test_descriptor_testnet_address() {
         let key = test_key();
-        let desc = Descriptor::pkh(key.clone());
-        let mainnet = desc.address("bc").expect("ok");
-        let testnet_desc = Descriptor::pkh(key);
-        let testnet = testnet_desc.address("tb").expect("ok");
+        let mainnet = Descriptor::pkh(key.clone()).address("bc").expect("ok");
+        let testnet = Descriptor::pkh(key).address("tb").expect("ok");
         assert_ne!(mainnet, testnet);
+        assert!(testnet.starts_with('m') || testnet.starts_with('n'));
     }
 
     #[test]
     fn test_descriptor_op_return() {
         let data = vec![0x01, 0x02, 0x03];
-        let desc = Descriptor::OpReturn(data.clone());
+        let desc = Descriptor::OpReturn(data);
         let script = desc.script_pubkey().expect("ok");
         assert_eq!(script[0], 0x6a); // OP_RETURN
         assert!(desc.address("bc").is_err()); // no address for OP_RETURN
+    }
+
+    #[test]
+    fn test_descriptor_xonly_key_no_hash160() {
+        let key = DescriptorKey::from_hex(
+            "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798",
+        )
+        .expect("valid");
+        assert!(key.hash160().is_none()); // x-only keys don't support HASH160
+        assert!(Descriptor::pkh(key).script_pubkey().is_err()); // pkh with x-only should error
     }
 }

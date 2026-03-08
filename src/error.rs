@@ -39,4 +39,12 @@ pub enum SignerError {
     /// BLS signature aggregation failed.
     #[error("aggregation error: {0}")]
     AggregationError(String),
+
+    /// Encoding or decoding failed (bech32, base58, compact size, hex).
+    #[error("encoding error: {0}")]
+    EncodingError(String),
+
+    /// Parsing failed (descriptors, PSBT, script).
+    #[error("parse error: {0}")]
+    ParseError(String),
 }

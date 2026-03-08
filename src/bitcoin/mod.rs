@@ -7,6 +7,8 @@ pub mod schnorr;
 pub mod message;
 pub mod taproot;
 pub mod tapscript;
+pub mod psbt;
+pub mod descriptor;
 
 use crate::error::SignerError;
 use crate::traits;
