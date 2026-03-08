@@ -5,6 +5,7 @@
 
 pub mod descriptor;
 pub mod helpers;
+pub mod lightning;
 pub mod message;
 pub mod multisig;
 pub mod psbt;
