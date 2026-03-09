@@ -27,7 +27,9 @@ use crate::ethereum::abi::{AbiValue, Function};
 
 /// Uniswap V4 PoolManager address (Ethereum mainnet).
 ///
-/// **TODO**: Update with the canonical PoolManager address once V4 is deployed.
+/// **WARNING**: This is a placeholder value — V4 is not yet deployed on mainnet.
+/// Do **not** use in production until updated with the canonical address.
+#[deprecated(note = "placeholder address — Uniswap V4 not yet deployed on mainnet")]
 pub const POOL_MANAGER: [u8; 20] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

@@ -27,18 +27,14 @@ const SYSTEM_PROGRAM_ID: [u8; 32] = [0; 32];
 ///
 /// Returns the deterministic ATA address as 32 bytes.
 pub fn derive_ata_address(wallet: &[u8; 32], mint: &[u8; 32]) -> [u8; 32] {
-    // Simplified PDA derivation: SHA-256(seeds || program_id || "ProgramDerivedAddress")
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(wallet);
-    hasher.update(SPL_TOKEN_PROGRAM_ID);
-    hasher.update(mint);
-    hasher.update(ATA_PROGRAM_ID);
-    hasher.update(b"ProgramDerivedAddress");
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
+    use crate::solana::transaction::find_program_address;
+    let seeds: &[&[u8]] = &[wallet, &SPL_TOKEN_PROGRAM_ID, mint];
+    match find_program_address(seeds, &ATA_PROGRAM_ID) {
+        Ok((addr, _bump)) => addr,
+        // PDA derivation with valid seeds should always succeed;
+        // return zeroed on failure as a safe fallback.
+        Err(_) => [0u8; 32],
+    }
 }
 
 /// Create an Associated Token Account instruction.
@@ -88,8 +84,9 @@ pub fn create_ata_idempotent(payer: [u8; 32], wallet: [u8; 32], mint: [u8; 32]) 
 
 /// Memo Program ID (v2): `MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`.
 pub const MEMO_PROGRAM_ID: [u8; 32] = [
-    5, 74, 83, 80, 248, 93, 200, 130, 214, 20, 165, 86, 114, 120, 138, 41, 109, 223, 30, 171, 171,
-    208, 166, 6, 120, 136, 73, 50, 244, 238, 246, 160,
+    0x05, 0x4A, 0x53, 0x5A, 0x99, 0x29, 0x21, 0x06, 0x4D, 0x24, 0xE8, 0x71, 0x60, 0xDA, 0x38,
+    0x7C, 0x7C, 0x35, 0xB5, 0xDD, 0xBC, 0x92, 0xBB, 0x81, 0xE4, 0x1F, 0xA8, 0x40, 0x41, 0x05,
+    0x44, 0x8D,
 ];
 
 /// Create a Memo instruction (v2 — supports signer verification).
@@ -125,26 +122,30 @@ pub fn memo_unsigned(memo_text: &str) -> Instruction {
 
 /// Stake Program ID: `Stake11111111111111111111111111111111111111`.
 pub const STAKE_PROGRAM_ID: [u8; 32] = [
-    6, 161, 216, 23, 145, 55, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0,
+    0x06, 0xA1, 0xD8, 0x17, 0x91, 0x37, 0x54, 0x2A, 0x98, 0x34, 0x37, 0xBD, 0xFE, 0x2A, 0x7A,
+    0xB2, 0x55, 0x7F, 0x53, 0x5C, 0x8A, 0x78, 0x72, 0x2B, 0x68, 0xA4, 0x9D, 0xC0, 0x00, 0x00,
+    0x00, 0x00,
 ];
 
-/// Stake Config ID.
+/// Stake Config ID: `StakeConfig11111111111111111111111111111111`.
 pub const STAKE_CONFIG_ID: [u8; 32] = [
-    6, 161, 216, 23, 165, 55, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0,
+    0x06, 0xA1, 0xD8, 0x17, 0xA5, 0x02, 0x05, 0x0B, 0x68, 0x07, 0x91, 0xE6, 0xCE, 0x6D, 0xB8,
+    0x8E, 0x1E, 0x5B, 0x71, 0x50, 0xF6, 0x1F, 0xC6, 0x79, 0x0A, 0x4E, 0xB4, 0xD1, 0x00, 0x00,
+    0x00, 0x00,
 ];
 
-/// Clock sysvar.
+/// Clock sysvar: `SysvarC1ock11111111111111111111111111111111`.
 pub const CLOCK_SYSVAR: [u8; 32] = [
-    6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182, 139, 94, 184, 163, 155,
-    75, 109, 92, 115, 85, 91, 33, 0, 0, 0, 0,
+    0x06, 0xA7, 0xD5, 0x17, 0x18, 0xC7, 0x74, 0xC9, 0x28, 0x56, 0x63, 0x98, 0x69, 0x1D, 0x5E,
+    0xB6, 0x8B, 0x5E, 0xB8, 0xA3, 0x9B, 0x4B, 0x6D, 0x5C, 0x73, 0x55, 0x5B, 0x21, 0x00, 0x00,
+    0x00, 0x00,
 ];
 
-/// Stake History sysvar.
+/// Stake History sysvar: `SysvarStakeHistory1111111111111111111111111`.
 pub const STAKE_HISTORY_SYSVAR: [u8; 32] = [
-    6, 167, 213, 23, 25, 47, 10, 175, 198, 242, 101, 227, 251, 119, 204, 122, 218, 130, 197, 41,
-    208, 190, 59, 19, 110, 45, 0, 85, 32, 0, 0, 0,
+    0x06, 0xA7, 0xD5, 0x17, 0x19, 0x35, 0x84, 0xD0, 0xFE, 0xED, 0x9B, 0xB3, 0x43, 0x1D, 0x13,
+    0x20, 0x6B, 0xE5, 0x44, 0x28, 0x1B, 0x57, 0xB8, 0x56, 0x6C, 0xC5, 0x37, 0x5F, 0xF4, 0x00,
+    0x00, 0x00,
 ];
 
 /// Create a DelegateStake instruction.
@@ -225,10 +226,11 @@ pub fn stake_withdraw(
 /// This must be the first instruction in a durable nonce transaction.
 /// It advances the nonce value, preventing replay.
 pub fn advance_nonce(nonce_account: [u8; 32], nonce_authority: [u8; 32]) -> Instruction {
-    // Recent Sysvar ID
+    // RecentBlockhashes sysvar: `SysvarRecentB1ockHashes11111111111111111111`
     let recent_blockhashes_sysvar: [u8; 32] = [
-        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182, 139, 94, 184, 163,
-        155, 75, 109, 92, 115, 85, 91, 32, 0, 0, 0, 0,
+        0x06, 0xA7, 0xD5, 0x17, 0x19, 0x2C, 0x56, 0x8E, 0xE0, 0x8A, 0x84, 0x5F, 0x73, 0xD2,
+        0x97, 0x88, 0xCF, 0x03, 0x5C, 0x31, 0x45, 0xB2, 0x1A, 0xB3, 0x44, 0xD8, 0x06, 0x2E,
+        0xA9, 0x40, 0x00, 0x00,
     ];
 
     let mut data = vec![0u8; 4];
@@ -249,14 +251,17 @@ pub fn advance_nonce(nonce_account: [u8; 32], nonce_authority: [u8; 32]) -> Inst
 ///
 /// Initializes a nonce account with a specified authority.
 pub fn initialize_nonce(nonce_account: [u8; 32], nonce_authority: [u8; 32]) -> Instruction {
+    // RecentBlockhashes sysvar: `SysvarRecentB1ockHashes11111111111111111111`
     let recent_blockhashes_sysvar: [u8; 32] = [
-        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182, 139, 94, 184, 163,
-        155, 75, 109, 92, 115, 85, 91, 32, 0, 0, 0, 0,
+        0x06, 0xA7, 0xD5, 0x17, 0x19, 0x2C, 0x56, 0x8E, 0xE0, 0x8A, 0x84, 0x5F, 0x73, 0xD2,
+        0x97, 0x88, 0xCF, 0x03, 0x5C, 0x31, 0x45, 0xB2, 0x1A, 0xB3, 0x44, 0xD8, 0x06, 0x2E,
+        0xA9, 0x40, 0x00, 0x00,
     ];
-    // Rent sysvar
+    // Rent sysvar: `SysvarRent111111111111111111111111111111111`
     let rent_sysvar: [u8; 32] = [
-        6, 167, 213, 23, 25, 47, 10, 175, 198, 242, 101, 227, 251, 119, 204, 122, 218, 130, 197,
-        41, 208, 190, 59, 19, 110, 45, 0, 85, 31, 0, 0, 0,
+        0x06, 0xA7, 0xD5, 0x17, 0x19, 0x2C, 0x5C, 0x51, 0x21, 0x8C, 0xC9, 0x4C, 0x3D, 0x4A,
+        0xF1, 0x7F, 0x58, 0xDA, 0xEE, 0x08, 0x9B, 0xA1, 0xFD, 0x44, 0xE3, 0xDB, 0xD9, 0x8A,
+        0x00, 0x00, 0x00, 0x00,
     ];
 
     let mut data = vec![0u8; 36];
@@ -284,9 +289,9 @@ pub mod address_lookup_table {
 
     /// Address Lookup Table Program ID: `AddressLookupTab1e1111111111111111111111111`
     pub const ID: [u8; 32] = [
-        0x06, 0xa1, 0xd8, 0x17, 0x91, 0x37, 0x68, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00,
+        0x02, 0x77, 0xA6, 0xAF, 0x97, 0x33, 0x9B, 0x7A, 0xC8, 0x8D, 0x18, 0x92, 0xC9, 0x04,
+        0x46, 0xF5, 0x00, 0x02, 0x30, 0x92, 0x66, 0xF6, 0x2E, 0x53, 0xC1, 0x18, 0x24, 0x49,
+        0x82, 0x00, 0x00, 0x00,
     ];
 
     /// Create an Address Lookup Table.
@@ -392,9 +397,9 @@ pub mod token_metadata {
 
     /// Metaplex Token Metadata Program ID: `metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s`
     pub const ID: [u8; 32] = [
-        0x0b, 0x74, 0x65, 0x78, 0x74, 0x50, 0x55, 0x73, 0x40, 0x6a, 0xc2, 0x14, 0x12, 0xf3, 0x26,
-        0xf7, 0x1b, 0x1e, 0xce, 0xf0, 0x77, 0x87, 0x28, 0x76, 0xf8, 0xba, 0x16, 0x1b, 0x70, 0x4c,
-        0x9f, 0x04,
+        0x0B, 0x70, 0x65, 0xB1, 0xE3, 0xD1, 0x7C, 0x45, 0x38, 0x9D, 0x52, 0x7F, 0x6B, 0x04,
+        0xC3, 0xCD, 0x58, 0xB8, 0x6C, 0x73, 0x1A, 0xA0, 0xFD, 0xB5, 0x49, 0xB6, 0xD1, 0xBC,
+        0x03, 0xF8, 0x29, 0x46,
     ];
 
     /// Token Metadata data for CreateMetadataAccountV3.
@@ -427,18 +432,12 @@ pub mod token_metadata {
     ///
     /// PDA: `["metadata", metadata_program_id, mint]`
     pub fn derive_metadata_address(mint: &[u8; 32]) -> [u8; 32] {
-        use sha2::{Digest, Sha256};
-        // Simplified PDA — in production use find_program_address
-        let mut hasher = Sha256::new();
-        hasher.update(b"metadata");
-        hasher.update(ID);
-        hasher.update(mint);
-        hasher.update(ID);
-        hasher.update(b"ProgramDerivedAddress");
-        let result = hasher.finalize();
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&result);
-        out
+        use crate::solana::transaction::find_program_address;
+        let seeds: &[&[u8]] = &[b"metadata", &ID, mint];
+        match find_program_address(seeds, &ID) {
+            Ok((addr, _bump)) => addr,
+            Err(_) => [0u8; 32],
+        }
     }
 
     /// Serialize a Borsh-encoded string (u32 len + UTF-8 bytes).

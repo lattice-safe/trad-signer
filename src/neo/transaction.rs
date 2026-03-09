@@ -82,6 +82,12 @@ impl ScriptBuilder {
         if len <= 0xFF {
             self.data.push(opcode::PUSHDATA1);
             self.data.push(len as u8);
+        } else if len <= 0xFFFF {
+            self.data.push(0x0D); // PUSHDATA2
+            self.data.extend_from_slice(&(len as u16).to_le_bytes());
+        } else {
+            self.data.push(0x0E); // PUSHDATA4
+            self.data.extend_from_slice(&(len as u32).to_le_bytes());
         }
         self.data.extend_from_slice(data);
         self
@@ -469,7 +475,11 @@ impl NeoTransaction {
                 0x01 => WitnessScope::CalledByEntry,
                 0x10 => WitnessScope::CustomContracts,
                 0x80 => WitnessScope::Global,
-                _ => WitnessScope::CalledByEntry,
+                _ => {
+                    return Err(SignerError::ParseError(format!(
+                        "neo tx: unknown witness scope 0x{scope_byte:02x}"
+                    )))
+                }
             };
             let mut allowed_contracts = Vec::new();
             if scope == WitnessScope::CustomContracts {
@@ -558,8 +568,6 @@ pub fn nep17_approve(
     sb.emit_push_integer(amount)
         .emit_push_hash160(spender)
         .emit_push_hash160(owner)
-        .emit(opcode::PUSH3)
-        .emit(opcode::PACK)
         .emit_contract_call(token_hash, "approve", 3);
     sb.to_bytes()
 }
@@ -571,8 +579,6 @@ pub fn nep17_allowance(token_hash: &[u8; 20], owner: &[u8; 20], spender: &[u8; 2
     let mut sb = ScriptBuilder::new();
     sb.emit_push_hash160(spender)
         .emit_push_hash160(owner)
-        .emit(opcode::PUSH2)
-        .emit(opcode::PACK)
         .emit_contract_call(token_hash, "allowance", 2);
     sb.to_bytes()
 }
@@ -592,8 +598,6 @@ pub fn nep17_transfer_from(
         .emit_push_hash160(to)
         .emit_push_hash160(from)
         .emit_push_hash160(spender)
-        .emit(opcode::PUSH4)
-        .emit(opcode::PACK)
         .emit_contract_call(token_hash, "transferFrom", 4);
     sb.to_bytes()
 }
@@ -661,8 +665,6 @@ pub fn neo_vote(voter: &[u8; 20], candidate_pubkey: Option<&[u8; 33]>) -> Vec<u8
         None => sb.emit(opcode::PUSH0), // null = cancel vote
     };
     sb.emit_push_hash160(voter)
-        .emit(opcode::PUSH2)
-        .emit(opcode::PACK)
         .emit_contract_call(&contracts::NEO_TOKEN, "vote", 2);
     sb.to_bytes()
 }
@@ -672,8 +674,6 @@ pub fn neo_unclaimed_gas(account: &[u8; 20], end_height: u32) -> Vec<u8> {
     let mut sb = ScriptBuilder::new();
     sb.emit_push_integer(i64::from(end_height))
         .emit_push_hash160(account)
-        .emit(opcode::PUSH2)
-        .emit(opcode::PACK)
         .emit_contract_call(&contracts::NEO_TOKEN, "unclaimedGas", 2);
     sb.to_bytes()
 }
@@ -682,8 +682,6 @@ pub fn neo_unclaimed_gas(account: &[u8; 20], end_height: u32) -> Vec<u8> {
 pub fn neo_register_candidate(pubkey: &[u8; 33]) -> Vec<u8> {
     let mut sb = ScriptBuilder::new();
     sb.emit_push_bytes(pubkey)
-        .emit(opcode::PUSH1)
-        .emit(opcode::PACK)
         .emit_contract_call(&contracts::NEO_TOKEN, "registerCandidate", 1);
     sb.to_bytes()
 }
@@ -691,18 +689,14 @@ pub fn neo_register_candidate(pubkey: &[u8; 33]) -> Vec<u8> {
 /// Build a script to query the list of registered candidates.
 pub fn neo_get_candidates() -> Vec<u8> {
     let mut sb = ScriptBuilder::new();
-    sb.emit(opcode::PUSH0)
-        .emit(opcode::PACK)
-        .emit_contract_call(&contracts::NEO_TOKEN, "getCandidates", 0);
+    sb.emit_contract_call(&contracts::NEO_TOKEN, "getCandidates", 0);
     sb.to_bytes()
 }
 
 /// Build a script to get the current committee members.
 pub fn neo_get_committee() -> Vec<u8> {
     let mut sb = ScriptBuilder::new();
-    sb.emit(opcode::PUSH0)
-        .emit(opcode::PACK)
-        .emit_contract_call(&contracts::NEO_TOKEN, "getCommittee", 0);
+    sb.emit_contract_call(&contracts::NEO_TOKEN, "getCommittee", 0);
     sb.to_bytes()
 }
 
