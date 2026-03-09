@@ -5,7 +5,7 @@
 
 use crate::error::SignerError;
 use crate::threshold::frost::keygen::{derive_interpolating_value, KeyPackage};
-#[allow(unused_imports)]
+// GroupEncoding import required for AffinePoint::from_bytes() trait resolution.
 use k256::elliptic_curve::group::GroupEncoding;
 use k256::elliptic_curve::ops::Reduce;
 use k256::elliptic_curve::sec1::ToEncodedPoint;
@@ -95,7 +95,10 @@ fn h2(data: &[u8]) -> Scalar {
     hash_to_scalar(b"chal", data)
 }
 
-/// H3: Hash to scalar for nonce generation (RFC 9591 spec completeness).
+/// H3: Hash to scalar for nonce generation.
+///
+/// Included for RFC 9591 spec completeness. Currently used internally
+/// by the nonce generation path that takes a pre-hashed auxiliary rand.
 #[allow(dead_code)]
 fn h3(data: &[u8]) -> Scalar {
     hash_to_scalar(b"nonce", data)

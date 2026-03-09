@@ -193,7 +193,7 @@ pub fn taproot_tweak(
     pk_sec1[1..].copy_from_slice(internal_key);
 
     // Parse the internal key point
-    #[allow(unused_imports)]
+    // GroupEncoding import required for AffinePoint::from_bytes() trait resolution.
     use k256::elliptic_curve::group::GroupEncoding;
     use k256::AffinePoint;
 

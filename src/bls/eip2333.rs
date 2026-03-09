@@ -18,7 +18,10 @@ use zeroize::Zeroizing;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The BLS12-381 scalar field order r (for reference).
+/// The BLS12-381 scalar field order `r`.
+///
+/// Kept for reference and potential future use in manual scalar reduction
+/// or validation. Not directly consumed by current HKDF-based derivation.
 #[allow(dead_code)]
 const R_BYTES: [u8; 32] = [
     0x73, 0xed, 0xa7, 0x53, 0x29, 0x9d, 0x7d, 0x48, 0x33, 0x39, 0xd8, 0x08, 0x09, 0xa1, 0xd8, 0x05,

@@ -63,8 +63,14 @@ const TOKEN_PROGRAM: [u8; 32] = {
 
 const IX_CREATE_REALM: u8 = 0;
 const IX_DEPOSIT_GOVERNING_TOKENS: u8 = 1;
+/// Withdraw governing tokens (SPL Governance instruction index).
+///
+/// Included for spec completeness — not currently used in the encoding API.
 #[allow(dead_code)]
 const IX_WITHDRAW_GOVERNING_TOKENS: u8 = 2;
+/// Create governance (SPL Governance instruction index).
+///
+/// Included for spec completeness — not currently used in the encoding API.
 #[allow(dead_code)]
 const IX_CREATE_GOVERNANCE: u8 = 3;
 const IX_CREATE_PROPOSAL: u8 = 4;
