@@ -438,7 +438,6 @@ pub fn encode_approve_hash(hash: &[u8; 32]) -> Vec<u8> {
 /// - `r` = owner address (left-padded to 32 bytes)
 /// - `s` = zero
 /// - `v` = 1
-#[must_use]
 pub fn pre_validated_signature(owner: [u8; 20]) -> super::EthereumSignature {
     super::EthereumSignature {
         r: pad_address(&owner),
@@ -468,7 +467,6 @@ pub fn encode_approved_hashes(owner: [u8; 20], hash: &[u8; 32]) -> Vec<u8> {
 ///
 /// The actual contract signature data is appended after the fixed-size
 /// signature block.
-#[must_use]
 pub fn contract_signature(contract_owner: [u8; 20], data_offset: u32) -> super::EthereumSignature {
     let mut s = [0u8; 32];
     s[28..32].copy_from_slice(&data_offset.to_be_bytes());
@@ -561,7 +559,7 @@ pub fn encode_get_modules_paginated(start: [u8; 20], page_size: u64) -> Vec<u8> 
 /// ABI-encode `setup(address[] calldata _owners, uint256 _threshold, ...)`.
 ///
 /// The initializer called when deploying a new Safe proxy.
-#[must_use]
+#[allow(clippy::too_many_arguments)]
 pub fn encode_setup(
     owners: &[[u8; 20]],
     threshold: u64,

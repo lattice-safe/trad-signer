@@ -450,7 +450,7 @@ impl PsbtV2 {
                             let v = u32::from_le_bytes([val[0], val[1], val[2], val[3]]);
                             if v != 2 {
                                 return Err(SignerError::ParseError(
-                                    format!("expected PSBT version 2, got {v}").into(),
+                                    format!("expected PSBT version 2, got {v}"),
                                 ));
                             }
                             found_version = true;
