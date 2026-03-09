@@ -13,9 +13,7 @@ use zeroize::Zeroizing;
 
 /// Hash to scalar using tagged hash.
 fn tagged_hash_scalar(tag: &[u8], data: &[u8]) -> Scalar {
-    let hash = crypto::tagged_hash(tag, data);
-    let wide = k256::U256::from_be_slice(&hash);
-    <Scalar as Reduce<k256::U256>>::reduce(wide)
+    super::tagged_hash_scalar(tag, data)
 }
 
 // ─── Key Aggregation (BIP-327 KeyAgg) ───────────────────────────────

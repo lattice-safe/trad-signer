@@ -36,23 +36,12 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 // Bitcoin Script Opcodes (HTLC subset)
 // ═══════════════════════════════════════════════════════════════════
 
-#[allow(dead_code)]
 const OP_IF: u8 = 0x63;
-#[allow(dead_code)]
 const OP_ELSE: u8 = 0x67;
-#[allow(dead_code)]
 const OP_ENDIF: u8 = 0x68;
-#[allow(dead_code)]
 const OP_DROP: u8 = 0x75;
-#[allow(dead_code)]
-const OP_DUP: u8 = 0x76;
-#[allow(dead_code)]
-const OP_EQUAL: u8 = 0x87;
-#[allow(dead_code)]
 const OP_EQUALVERIFY: u8 = 0x88;
 const OP_SHA256: u8 = 0xa8;
-#[allow(dead_code)]
-const OP_HASH160: u8 = 0xa9;
 const OP_CHECKSIG: u8 = 0xac;
 const OP_CLTV: u8 = 0xb1; // OP_CHECKLOCKTIMEVERIFY
 const OP_CSV: u8 = 0xb2;  // OP_CHECKSEQUENCEVERIFY

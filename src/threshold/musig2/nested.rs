@@ -13,10 +13,8 @@
 //! The group Q_a signs internally using 2-of-2 MuSig2, then their combined
 //! partial signature contributes as one signer to the top-level session.
 
-use crate::crypto;
 use crate::error::SignerError;
 use k256::elliptic_curve::group::GroupEncoding;
-use k256::elliptic_curve::ops::Reduce;
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use k256::{AffinePoint, ProjectivePoint, Scalar};
 
@@ -225,11 +223,9 @@ pub fn grouped_key_tree(groups: &[Vec<[u8; 33]>]) -> KeyTreeNode {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-/// Tagged hash to scalar (duplicated for module isolation).
+/// Tagged hash to scalar — delegates to shared implementation.
 fn tagged_hash_scalar(tag: &[u8], data: &[u8]) -> Scalar {
-    let hash = crypto::tagged_hash(tag, data);
-    let wide = k256::U256::from_be_slice(&hash);
-    <Scalar as Reduce<k256::U256>>::reduce(wide)
+    super::tagged_hash_scalar(tag, data)
 }
 
 // ═══════════════════════════════════════════════════════════════════

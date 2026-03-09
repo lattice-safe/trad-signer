@@ -49,3 +49,14 @@ pub mod signing;
 pub mod tweak;
 
 pub use signing::*;
+
+/// Hash to scalar using tagged hash (shared by signing.rs and nested.rs).
+use crate::crypto;
+use k256::elliptic_curve::ops::Reduce;
+use k256::Scalar;
+
+pub(crate) fn tagged_hash_scalar(tag: &[u8], data: &[u8]) -> Scalar {
+    let hash = crypto::tagged_hash(tag, data);
+    let wide = k256::U256::from_be_slice(&hash);
+    <Scalar as Reduce<k256::U256>>::reduce(wide)
+}
