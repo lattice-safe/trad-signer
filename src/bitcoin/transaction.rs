@@ -235,11 +235,14 @@ pub fn parse_unsigned_tx(data: &[u8]) -> Result<Transaction, crate::error::Signe
         off += 4;
 
         let script_len = safe_usize(encoding::read_compact_size(data, &mut off)?)?;
-        if off + script_len > data.len() {
+        let script_end = off.checked_add(script_len).ok_or_else(|| {
+            SignerError::ParseError("tx: scriptSig length overflow".into())
+        })?;
+        if script_end > data.len() {
             return Err(SignerError::ParseError("tx truncated in scriptSig".into()));
         }
-        let script_sig = data[off..off + script_len].to_vec();
-        off += script_len;
+        let script_sig = data[off..script_end].to_vec();
+        off = script_end;
 
         if off + 4 > data.len() {
             return Err(SignerError::ParseError("tx truncated in sequence".into()));
@@ -270,13 +273,16 @@ pub fn parse_unsigned_tx(data: &[u8]) -> Result<Transaction, crate::error::Signe
         off += 8;
 
         let spk_len = safe_usize(encoding::read_compact_size(data, &mut off)?)?;
-        if off + spk_len > data.len() {
+        let spk_end = off.checked_add(spk_len).ok_or_else(|| {
+            SignerError::ParseError("tx: scriptPubKey length overflow".into())
+        })?;
+        if spk_end > data.len() {
             return Err(SignerError::ParseError(
                 "tx truncated in scriptPubKey".into(),
             ));
         }
-        let script_pubkey = data[off..off + spk_len].to_vec();
-        off += spk_len;
+        let script_pubkey = data[off..spk_end].to_vec();
+        off = spk_end;
 
         outputs.push(TxOut {
             value,

@@ -211,7 +211,9 @@ fn decode_item(data: &[u8], offset: usize) -> Result<(RlpItem, usize), SignerErr
                 ));
             }
             let start = offset + 1 + len_of_len;
-            let end = start + len;
+            let end = start.checked_add(len).ok_or_else(|| {
+                SignerError::ParseError("RLP: long string length overflow".into())
+            })?;
             if end > data.len() {
                 return Err(SignerError::ParseError("RLP: long string truncated".into()));
             }
@@ -241,7 +243,9 @@ fn decode_item(data: &[u8], offset: usize) -> Result<(RlpItem, usize), SignerErr
                 ));
             }
             let start = offset + 1 + len_of_len;
-            let end = start + list_len;
+            let end = start.checked_add(list_len).ok_or_else(|| {
+                SignerError::ParseError("RLP: long list length overflow".into())
+            })?;
             if end > data.len() {
                 return Err(SignerError::ParseError("RLP: long list truncated".into()));
             }

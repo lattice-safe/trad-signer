@@ -230,7 +230,15 @@ impl Psbt {
         // Extract scriptPubKey (skip compact size)
         let mut utxo_off = 8usize;
         let script_len = encoding::read_compact_size(&utxo_data, &mut utxo_off)? as usize;
-        let script_pk = &utxo_data[utxo_off..utxo_off + script_len];
+        let script_end = utxo_off.checked_add(script_len).ok_or_else(|| {
+            SignerError::SigningFailed("witness UTXO script length overflow".into())
+        })?;
+        if script_end > utxo_data.len() {
+            return Err(SignerError::SigningFailed(
+                "witness UTXO script truncated".into(),
+            ));
+        }
+        let script_pk = &utxo_data[utxo_off..script_end];
 
         // Extract pubkey hash from P2WPKH scriptPubKey: OP_0 OP_PUSH20 <hash>
         if script_pk.len() != 22 || script_pk[0] != 0x00 || script_pk[1] != 0x14 {
@@ -311,7 +319,17 @@ impl Psbt {
             let amount = u64::from_le_bytes(amount_bytes);
             let mut utxo_off = 8usize;
             let script_len = encoding::read_compact_size(utxo_data, &mut utxo_off)? as usize;
-            let script_pk = utxo_data[utxo_off..utxo_off + script_len].to_vec();
+            let script_end = utxo_off.checked_add(script_len).ok_or_else(|| {
+                SignerError::SigningFailed(format!(
+                    "witness UTXO {i} script length overflow"
+                ))
+            })?;
+            if script_end > utxo_data.len() {
+                return Err(SignerError::SigningFailed(format!(
+                    "witness UTXO {i} script truncated"
+                )));
+            }
+            let script_pk = utxo_data[utxo_off..script_end].to_vec();
             prevouts.push(TxOut {
                 value: amount,
                 script_pubkey: script_pk,
@@ -415,47 +433,38 @@ impl Psbt {
             .get(&vec![0x00])
             .and_then(|raw_tx| extract_tx_io_counts(raw_tx));
 
-        if let Some((num_inputs, num_outputs)) = counts {
-            // Parse exactly num_inputs input maps, then num_outputs output maps
-            for _ in 0..num_inputs {
-                if offset >= data.len() {
-                    break;
-                }
-                psbt.inputs.push(parse_kv_map(data, &mut offset)?);
+        let (num_inputs, num_outputs) = counts.ok_or_else(|| {
+            SignerError::ParseError(
+                "PSBT: missing or malformed unsigned transaction (key 0x00)".into(),
+            )
+        })?;
+
+        // Parse exactly num_inputs input maps, then num_outputs output maps
+        for i in 0..num_inputs {
+            if offset >= data.len() {
+                return Err(SignerError::ParseError(format!(
+                    "PSBT truncated: expected {} inputs, got {}",
+                    num_inputs, i
+                )));
             }
-            for _ in 0..num_outputs {
-                if offset >= data.len() {
-                    break;
-                }
-                psbt.outputs.push(parse_kv_map(data, &mut offset)?);
+            psbt.inputs.push(parse_kv_map(data, &mut offset)?);
+        }
+        for i in 0..num_outputs {
+            if offset >= data.len() {
+                return Err(SignerError::ParseError(format!(
+                    "PSBT truncated: expected {} outputs, got {}",
+                    num_outputs, i
+                )));
             }
-        } else {
-            // Fallback: heuristic classification
-            while offset < data.len() {
-                let map = parse_kv_map(data, &mut offset)?;
-                if !map.is_empty() {
-                    let has_input_keys = map.keys().any(|k| {
-                        matches!(
-                            k.first(),
-                            Some(&0x00)
-                                | Some(&0x01)
-                                | Some(&0x02)
-                                | Some(&0x03)
-                                | Some(&0x06)
-                                | Some(&0x07)
-                                | Some(&0x08)
-                                | Some(&0x13)
-                                | Some(&0x14)
-                                | Some(&0x17)
-                        )
-                    });
-                    if has_input_keys {
-                        psbt.inputs.push(map);
-                    } else {
-                        psbt.outputs.push(map);
-                    }
-                }
-            }
+            psbt.outputs.push(parse_kv_map(data, &mut offset)?);
+        }
+
+        // Reject trailing bytes
+        if offset != data.len() {
+            return Err(SignerError::ParseError(format!(
+                "PSBT has {} trailing bytes",
+                data.len() - offset
+            )));
         }
 
         Ok(psbt)
@@ -496,7 +505,10 @@ fn parse_kv_map(
         }
 
         // Read key
-        let end = *offset + key_len as usize;
+        let key_len_usize = key_len as usize;
+        let end = offset.checked_add(key_len_usize).ok_or_else(|| {
+            SignerError::ParseError("PSBT key length overflow".into())
+        })?;
         if end > data.len() {
             return Err(SignerError::ParseError("PSBT key truncated".into()));
         }
@@ -507,13 +519,22 @@ fn parse_kv_map(
         let val_len = encoding::read_compact_size(data, offset)?;
 
         // Read value
-        let end = *offset + val_len as usize;
+        let val_len_usize = val_len as usize;
+        let end = offset.checked_add(val_len_usize).ok_or_else(|| {
+            SignerError::ParseError("PSBT value length overflow".into())
+        })?;
         if end > data.len() {
             return Err(SignerError::ParseError("PSBT value truncated".into()));
         }
         let value = data[*offset..end].to_vec();
         *offset = end;
 
+        // Reject duplicate keys (BIP-174 requirement)
+        if map.contains_key(&key) {
+            return Err(SignerError::ParseError(
+                "PSBT: duplicate key in map".into(),
+            ));
+        }
         map.insert(key, value);
     }
 }
@@ -600,8 +621,21 @@ mod tests {
     #[test]
     fn test_psbt_serialize_deserialize_roundtrip() {
         let mut psbt = Psbt::new();
-        psbt.set_unsigned_tx(&[0x01, 0x00, 0x00, 0x00]);
+        // Build a minimal valid unsigned tx: version(4) + 0 inputs + 0 outputs + locktime(4)
+        let mut raw_tx = Vec::new();
+        raw_tx.extend_from_slice(&1i32.to_le_bytes()); // version
+        raw_tx.push(0x01); // 1 input
+        raw_tx.extend_from_slice(&[0xAA; 32]); // txid
+        raw_tx.extend_from_slice(&0u32.to_le_bytes()); // vout
+        raw_tx.push(0x00); // empty scriptSig
+        raw_tx.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // sequence
+        raw_tx.push(0x01); // 1 output
+        raw_tx.extend_from_slice(&50000u64.to_le_bytes()); // value
+        raw_tx.push(0x00); // empty scriptPubKey
+        raw_tx.extend_from_slice(&0u32.to_le_bytes()); // locktime
+        psbt.set_unsigned_tx(&raw_tx);
         let idx = psbt.add_input();
+        psbt.add_output();
         let script_pk = [
             0x00u8, 0x14, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
             0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
@@ -663,8 +697,8 @@ mod tests {
     fn test_psbt_empty_roundtrip() {
         let psbt = Psbt::new();
         let data = psbt.serialize();
-        let parsed = Psbt::deserialize(&data).expect("valid");
-        assert!(parsed.global.is_empty());
+        // Empty PSBT without unsigned tx should now be rejected
+        assert!(Psbt::deserialize(&data).is_err());
     }
 
     #[test]

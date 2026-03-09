@@ -52,6 +52,12 @@ pub fn read_compact_size(data: &[u8], offset: &mut usize) -> Result<u64, SignerE
             }
             let val = u16::from_le_bytes([data[*offset], data[*offset + 1]]);
             *offset += 2;
+            // Canonical: reject values that fit in single-byte form
+            if val < 0xFD {
+                return Err(SignerError::EncodingError(
+                    "compact size: non-canonical 0xFD encoding for value < 253".into(),
+                ));
+            }
             Ok(val as u64)
         }
         0xFE => {
@@ -63,7 +69,14 @@ pub fn read_compact_size(data: &[u8], offset: &mut usize) -> Result<u64, SignerE
             let mut buf = [0u8; 4];
             buf.copy_from_slice(&data[*offset..*offset + 4]);
             *offset += 4;
-            Ok(u32::from_le_bytes(buf) as u64)
+            let val = u32::from_le_bytes(buf);
+            // Canonical: reject values that fit in 2-byte form
+            if val <= 0xFFFF {
+                return Err(SignerError::EncodingError(
+                    "compact size: non-canonical 0xFE encoding for value <= 0xFFFF".into(),
+                ));
+            }
+            Ok(val as u64)
         }
         0xFF => {
             if *offset + 8 > data.len() {
@@ -74,7 +87,14 @@ pub fn read_compact_size(data: &[u8], offset: &mut usize) -> Result<u64, SignerE
             let mut buf = [0u8; 8];
             buf.copy_from_slice(&data[*offset..*offset + 8]);
             *offset += 8;
-            Ok(u64::from_le_bytes(buf))
+            let val = u64::from_le_bytes(buf);
+            // Canonical: reject values that fit in 4-byte form
+            if val <= 0xFFFF_FFFF {
+                return Err(SignerError::EncodingError(
+                    "compact size: non-canonical 0xFF encoding for value <= 0xFFFFFFFF".into(),
+                ));
+            }
+            Ok(val)
         }
     }
 }

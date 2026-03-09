@@ -516,13 +516,19 @@ impl NeoTransaction {
             pos += 1;
             let (attr_len, c) = read_var_int(&data[pos..])?;
             pos += c;
-            if pos + attr_len as usize > data.len() {
+            let attr_len_usize = usize::try_from(attr_len).map_err(|_| {
+                SignerError::ParseError("neo tx: attr length exceeds usize".into())
+            })?;
+            let attr_end = pos.checked_add(attr_len_usize).ok_or_else(|| {
+                SignerError::ParseError("neo tx: attr length overflow".into())
+            })?;
+            if attr_end > data.len() {
                 return Err(SignerError::ParseError(
                     "neo tx: truncated attr data".into(),
                 ));
             }
-            let attr_data = data[pos..pos + attr_len as usize].to_vec();
-            pos += attr_len as usize;
+            let attr_data = data[pos..attr_end].to_vec();
+            pos = attr_end;
             attributes.push(TransactionAttribute {
                 attr_type,
                 data: attr_data,
@@ -532,10 +538,25 @@ impl NeoTransaction {
         // Script
         let (script_len, consumed) = read_var_int(&data[pos..])?;
         pos += consumed;
-        if pos + script_len as usize > data.len() {
+        let script_len_usize = usize::try_from(script_len).map_err(|_| {
+            SignerError::ParseError("neo tx: script length exceeds usize".into())
+        })?;
+        let script_end = pos.checked_add(script_len_usize).ok_or_else(|| {
+            SignerError::ParseError("neo tx: script length overflow".into())
+        })?;
+        if script_end > data.len() {
             return Err(SignerError::ParseError("neo tx: truncated script".into()));
         }
-        let script = data[pos..pos + script_len as usize].to_vec();
+        let script = data[pos..script_end].to_vec();
+        pos = script_end;
+
+        // Reject trailing bytes
+        if pos != data.len() {
+            return Err(SignerError::ParseError(format!(
+                "neo tx: {} trailing bytes",
+                data.len() - pos
+            )));
+        }
 
         Ok(Self {
             version,

@@ -469,10 +469,10 @@ impl PsbtV2 {
                         }
                     }
                     global_key::INPUT_COUNT => {
-                        input_count = Some(read_compact_size(&val));
+                        input_count = Some(read_compact_size(&val)?);
                     }
                     global_key::OUTPUT_COUNT => {
-                        output_count = Some(read_compact_size(&val));
+                        output_count = Some(read_compact_size(&val)?);
                     }
                     global_key::TX_MODIFIABLE => {
                         if !val.is_empty() {
@@ -498,11 +498,13 @@ impl PsbtV2 {
             .ok_or_else(|| SignerError::ParseError("missing output count".into()))?;
 
         // Parse input maps
-        for _ in 0..n_inputs {
+        for i in 0..n_inputs {
             let mut input = PsbtV2Input::new([0; 32], 0);
+            let mut found_terminator = false;
             while pos < data.len() {
                 if data[pos] == 0x00 {
                     pos += 1;
+                    found_terminator = true;
                     break;
                 }
                 let (key, val, consumed) = read_kv(&data[pos..])?;
@@ -549,15 +551,22 @@ impl PsbtV2 {
                     input.extra.push((key, val));
                 }
             }
+            if !found_terminator {
+                return Err(SignerError::ParseError(format!(
+                    "PSBTv2: unterminated input map {i}"
+                )));
+            }
             psbt.inputs.push(input);
         }
 
         // Parse output maps
-        for _ in 0..n_outputs {
+        for i in 0..n_outputs {
             let mut output = PsbtV2Output::new(0, Vec::new());
+            let mut found_terminator = false;
             while pos < data.len() {
                 if data[pos] == 0x00 {
                     pos += 1;
+                    found_terminator = true;
                     break;
                 }
                 let (key, val, consumed) = read_kv(&data[pos..])?;
@@ -584,7 +593,20 @@ impl PsbtV2 {
                     output.extra.push((key, val));
                 }
             }
+            if !found_terminator {
+                return Err(SignerError::ParseError(format!(
+                    "PSBTv2: unterminated output map {i}"
+                )));
+            }
             psbt.outputs.push(output);
+        }
+
+        // Reject trailing bytes
+        if pos != data.len() {
+            return Err(SignerError::ParseError(format!(
+                "PSBTv2: {} trailing bytes",
+                data.len() - pos
+            )));
         }
 
         Ok(psbt)
@@ -650,18 +672,22 @@ fn compact_size(n: usize) -> Vec<u8> {
 }
 
 /// Read a compact_size from a serialized value.
-fn read_compact_size(data: &[u8]) -> usize {
+fn read_compact_size(data: &[u8]) -> Result<usize, SignerError> {
     if data.is_empty() {
-        return 0;
+        return Err(SignerError::ParseError(
+            "compact_size: empty data".into(),
+        ));
     }
     if data[0] < 0xFD {
-        data[0] as usize
+        Ok(data[0] as usize)
     } else if data[0] == 0xFD && data.len() >= 3 {
-        u16::from_le_bytes([data[1], data[2]]) as usize
+        Ok(u16::from_le_bytes([data[1], data[2]]) as usize)
     } else if data[0] == 0xFE && data.len() >= 5 {
-        u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize
+        Ok(u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize)
     } else {
-        0
+        Err(SignerError::ParseError(
+            "compact_size: truncated or unsupported".into(),
+        ))
     }
 }
 
@@ -1131,20 +1157,20 @@ mod tests {
 
     #[test]
     fn test_read_compact_size_small() {
-        assert_eq!(read_compact_size(&[42]), 42);
-        assert_eq!(read_compact_size(&[0]), 0);
-        assert_eq!(read_compact_size(&[252]), 252);
+        assert_eq!(read_compact_size(&[42]).unwrap(), 42);
+        assert_eq!(read_compact_size(&[0]).unwrap(), 0);
+        assert_eq!(read_compact_size(&[252]).unwrap(), 252);
     }
 
     #[test]
     fn test_read_compact_size_medium() {
         let data = [0xFD, 0x00, 0x01]; // 256
-        assert_eq!(read_compact_size(&data), 256);
+        assert_eq!(read_compact_size(&data).unwrap(), 256);
     }
 
     #[test]
     fn test_read_compact_size_empty() {
-        assert_eq!(read_compact_size(&[]), 0);
+        assert!(read_compact_size(&[]).is_err());
     }
 
     // ─── KV Helpers ──────────────────────────────────────────────

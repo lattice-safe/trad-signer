@@ -635,6 +635,11 @@ fn decode_type1_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
     payload.extend_from_slice(&rlp::encode_list(&sign_items));
     let signing_hash = keccak256(&payload);
 
+    if y_parity > 1 {
+        return Err(SignerError::ParseError(format!(
+            "type1: invalid y_parity {y_parity}"
+        )));
+    }
     let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
 
     Ok(DecodedTransaction {
@@ -693,6 +698,11 @@ fn decode_type2_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
     payload.extend_from_slice(&rlp::encode_list(&sign_items));
     let signing_hash = keccak256(&payload);
 
+    if y_parity > 1 {
+        return Err(SignerError::ParseError(format!(
+            "type2: invalid y_parity {y_parity}"
+        )));
+    }
     let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
 
     Ok(DecodedTransaction {
@@ -753,6 +763,11 @@ fn decode_type3_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
     payload.extend_from_slice(&rlp::encode_list(&sign_items));
     let signing_hash = keccak256(&payload);
 
+    if y_parity > 1 {
+        return Err(SignerError::ParseError(format!(
+            "type3: invalid y_parity {y_parity}"
+        )));
+    }
     let from = recover_signer(&signing_hash, &r, &s, y_parity as u8)?;
 
     Ok(DecodedTransaction {
