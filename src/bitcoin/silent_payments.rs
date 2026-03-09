@@ -12,15 +12,15 @@
 //! let spend_key = [0x02u8; 32];
 //! let scan_pub = pubkey_from_secret(&scan_key).unwrap();
 //! let spend_pub = pubkey_from_secret(&spend_key).unwrap();
-//! let addr = create_address(&scan_pub, &spend_pub, "sp").unwrap();
+//! let addr = create_address(&scan_pub, &spend_pub, "sp");
 //! ```
 
 use crate::crypto;
 use crate::error::SignerError;
+use zeroize::Zeroize;
 
-use k256::elliptic_curve::ops::Reduce;
 use k256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-use k256::{AffinePoint, ProjectivePoint, Scalar, U256};
+use k256::{AffinePoint, ProjectivePoint, Scalar};
 
 // ═══════════════════════════════════════════════════════════════════
 // Address Encoding (Bech32m with "sp" HRP)
@@ -53,28 +53,29 @@ impl Label {
 
     /// Compute the label tweak: `tagged_hash("BIP0352/Label", scan_key || ser_uint32(m))`.
     pub fn tweak(&self, scan_privkey: &[u8; 32]) -> [u8; 32] {
-        let mut data = Vec::with_capacity(36);
-        data.extend_from_slice(scan_privkey);
-        data.extend_from_slice(&self.m.to_be_bytes());
-        crypto::tagged_hash(b"BIP0352/Label", &data)
+        let mut data = [0u8; 36];
+        data[..32].copy_from_slice(scan_privkey);
+        data[32..].copy_from_slice(&self.m.to_be_bytes());
+        let result = crypto::tagged_hash(b"BIP0352/Label", &data);
+        data.zeroize(); // scan_privkey was copied here
+        result
     }
 }
 
 /// Create a Silent Payment address string from scan and spend public keys.
 ///
 /// Encodes as `{hrp}:{version_hex}{scan_pubkey_hex}{spend_pubkey_hex}`.
+#[must_use]
 pub fn create_address(
     scan_pubkey: &[u8; 33],
     spend_pubkey: &[u8; 33],
     hrp: &str,
-) -> Result<String, SignerError> {
-    let mut payload = Vec::with_capacity(67);
-    payload.push(0x00); // version 0
-    payload.extend_from_slice(scan_pubkey);
-    payload.extend_from_slice(spend_pubkey);
-
-    let data_hex = hex_encode(&payload);
-    Ok(format!("{hrp}:{data_hex}"))
+) -> String {
+    let mut payload = [0u8; 67];
+    payload[0] = 0x00; // version 0
+    payload[1..34].copy_from_slice(scan_pubkey);
+    payload[34..67].copy_from_slice(spend_pubkey);
+    format!("{hrp}:{}", hex::encode(payload))
 }
 
 /// Parse a Silent Payment address.
@@ -85,8 +86,8 @@ pub fn parse_address(address: &str) -> Result<SilentPaymentAddress, SignerError>
         .ok_or_else(|| SignerError::ParseError("no separator in SP address".into()))?;
 
     let data_part = &address[sep_pos + 1..];
-    let payload = hex_decode(data_part)
-        .map_err(|_| SignerError::ParseError("invalid SP address data".to_string()))?;
+    let payload = hex::decode(data_part)
+        .map_err(|_| SignerError::ParseError("invalid SP address hex".into()))?;
 
     if payload.len() < 67 {
         return Err(SignerError::ParseError(
@@ -132,6 +133,7 @@ pub fn pubkey_from_secret(secret: &[u8; 32]) -> Result<[u8; 33], SignerError> {
 /// Compute an ECDH shared secret between a private key and a public key.
 ///
 /// Returns `tagged_hash("BIP0352/SharedSecret", ECDH_point_x || input_hash)`.
+#[must_use = "shared secret must be used"]
 pub fn compute_shared_secret(
     privkey: &[u8; 32],
     pubkey: &[u8; 33],
@@ -143,28 +145,32 @@ pub fn compute_shared_secret(
     let x_bytes = shared.to_encoded_point(false);
     let x = &x_bytes.as_bytes()[1..33]; // x-coordinate
 
-    let mut data = Vec::with_capacity(64);
-    data.extend_from_slice(x);
-    data.extend_from_slice(input_hash);
-
-    Ok(crypto::tagged_hash(b"BIP0352/SharedSecret", &data))
+    let mut data = [0u8; 64];
+    data[..32].copy_from_slice(x);
+    data[32..].copy_from_slice(input_hash);
+    let result = crypto::tagged_hash(b"BIP0352/SharedSecret", &data);
+    data.zeroize(); // contains ECDH x-coordinate
+    Ok(result)
 }
 
 /// Derive the output public key for a Silent Payment recipient.
 ///
 /// `output_key = spend_pubkey + tagged_hash("BIP0352/SharedSecret", ...) * G`
+#[must_use = "output key must be used"]
 pub fn derive_output_key(
     shared_secret: &[u8; 32],
     spend_pubkey: &[u8; 33],
     k: u32,
 ) -> Result<[u8; 32], SignerError> {
     // t_k = tagged_hash("BIP0352/SharedSecret", shared_secret || ser_uint32(k))
-    let mut data = Vec::with_capacity(36);
-    data.extend_from_slice(shared_secret);
-    data.extend_from_slice(&k.to_be_bytes());
-    let t_k = crypto::tagged_hash(b"BIP0352/SharedSecret", &data);
+    let mut data = [0u8; 36];
+    data[..32].copy_from_slice(shared_secret);
+    data[32..].copy_from_slice(&k.to_be_bytes());
+    let mut t_k = crypto::tagged_hash(b"BIP0352/SharedSecret", &data);
+    data.zeroize();
 
     let tweak_scalar = parse_scalar(&t_k)?;
+    t_k.zeroize();
     let spend_point = parse_point(spend_pubkey)?;
     let output = spend_point + ProjectivePoint::GENERATOR * tweak_scalar;
     let encoded = output.to_affine().to_encoded_point(true);
@@ -187,23 +193,26 @@ pub fn compute_input_hash(
         return Err(SignerError::ParseError("no outpoints".into()));
     }
 
-    // Find the lexicographically smallest outpoint
-    let mut smallest = Vec::with_capacity(36);
-    smallest.extend_from_slice(&outpoints[0].0);
-    smallest.extend_from_slice(&outpoints[0].1.to_le_bytes());
+    // Serialize an outpoint into a fixed 36-byte buffer (no heap)
+    let serialize_outpoint = |txid: &[u8; 32], vout: u32| -> [u8; 36] {
+        let mut buf = [0u8; 36];
+        buf[..32].copy_from_slice(txid);
+        buf[32..].copy_from_slice(&vout.to_le_bytes());
+        buf
+    };
 
+    // Find the lexicographically smallest outpoint
+    let mut smallest = serialize_outpoint(&outpoints[0].0, outpoints[0].1);
     for op in &outpoints[1..] {
-        let mut candidate = Vec::with_capacity(36);
-        candidate.extend_from_slice(&op.0);
-        candidate.extend_from_slice(&op.1.to_le_bytes());
+        let candidate = serialize_outpoint(&op.0, op.1);
         if candidate < smallest {
             smallest = candidate;
         }
     }
 
-    let mut data = Vec::with_capacity(69);
-    data.extend_from_slice(&smallest);
-    data.extend_from_slice(sum_input_pubkeys);
+    let mut data = [0u8; 69];
+    data[..36].copy_from_slice(&smallest);
+    data[36..69].copy_from_slice(sum_input_pubkeys);
 
     Ok(crypto::tagged_hash(b"BIP0352/Inputs", &data))
 }
@@ -247,13 +256,13 @@ pub fn apply_label(
 // Helpers
 // ═══════════════════════════════════════════════════════════════════
 
+/// Parse a 32-byte big-endian scalar, rejecting zero and values ≥ curve order.
+///
+/// Unlike `Scalar::reduce()`, this does NOT silently wrap — it rejects invalid inputs.
 fn parse_scalar(bytes: &[u8; 32]) -> Result<Scalar, SignerError> {
-    let uint = U256::from_be_slice(bytes);
-    let scalar = <Scalar as Reduce<U256>>::reduce(uint);
-    if scalar.is_zero().into() {
-        return Err(SignerError::ParseError("zero scalar".to_string()));
-    }
-    Ok(scalar)
+    let nz = k256::NonZeroScalar::try_from(bytes as &[u8])
+        .map_err(|_| SignerError::ParseError("scalar is zero or >= curve order".into()))?;
+    Ok(*nz.as_ref())
 }
 
 fn parse_point(bytes: &[u8; 33]) -> Result<ProjectivePoint, SignerError> {
@@ -265,23 +274,6 @@ fn parse_point(bytes: &[u8; 33]) -> Result<ProjectivePoint, SignerError> {
     }
     #[allow(clippy::unwrap_used)]
     Ok(ProjectivePoint::from(point.unwrap()))
-}
-
-fn hex_encode(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn hex_decode(s: &str) -> Result<Vec<u8>, SignerError> {
-    if s.len() % 2 != 0 {
-        return Err(SignerError::ParseError("odd hex length".into()));
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&s[i..i + 2], 16)
-                .map_err(|_| SignerError::ParseError("invalid hex char".into()))
-        })
-        .collect()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -340,7 +332,7 @@ mod tests {
     fn test_create_address() {
         let scan = pubkey_from_secret(&SK1).unwrap();
         let spend = pubkey_from_secret(&SK2).unwrap();
-        let addr = create_address(&scan, &spend, "sp").unwrap();
+        let addr = create_address(&scan, &spend, "sp");
         assert!(addr.starts_with("sp:"));
     }
 
@@ -348,7 +340,7 @@ mod tests {
     fn test_create_address_roundtrip() {
         let scan = pubkey_from_secret(&SK1).unwrap();
         let spend = pubkey_from_secret(&SK2).unwrap();
-        let addr = create_address(&scan, &spend, "sp").unwrap();
+        let addr = create_address(&scan, &spend, "sp");
         let parsed = parse_address(&addr).unwrap();
         assert_eq!(parsed.scan_pubkey, scan);
         assert_eq!(parsed.spend_pubkey, spend);
@@ -489,20 +481,5 @@ mod tests {
         let labeled = apply_label(&spend, &tweak).unwrap();
         assert_ne!(labeled, spend);
         assert_eq!(labeled.len(), 33);
-    }
-
-    // ─── Hex Helpers ────────────────────────────────────────────
-
-    #[test]
-    fn test_hex_roundtrip() {
-        let data = vec![0x00, 0xFF, 0xAB, 0xCD];
-        let encoded = hex_encode(&data);
-        let decoded = hex_decode(&encoded).unwrap();
-        assert_eq!(data, decoded);
-    }
-
-    #[test]
-    fn test_hex_decode_odd_length() {
-        assert!(hex_decode("abc").is_err());
     }
 }
