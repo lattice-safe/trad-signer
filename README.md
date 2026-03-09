@@ -22,7 +22,7 @@
 
 ```toml
 [dependencies]
-chains-sdk = "0.8"
+chains-sdk = "0.9"
 ```
 
 ---
@@ -472,7 +472,7 @@ All modules are enabled by default. Disable unused ones to reduce compile time:
 
 ```toml
 [dependencies]
-chains-sdk = { version = "0.8", default-features = false, features = ["ethereum", "frost"] }
+chains-sdk = { version = "0.9", default-features = false, features = ["ethereum", "frost"] }
 ```
 
 | Feature | Description |
@@ -513,7 +513,7 @@ Run with `cargo bench --all-features`. Covers all chains + threshold signing:
 - Constant-time comparisons via `subtle::ConstantTimeEq`
 - FROST nonces are single-use `Zeroizing<Scalar>` with drop guards
 - `cargo audit`: **0 vulnerabilities** across 175+ dependencies
-- **1,100+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, EIP-4337, and FIPS 186-4 vectors
+- **1,500+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, EIP-2612, EIP-4337, ERC-4337, and FIPS 186-4 vectors
 
 ### Enclave / Confidential Computing
 
@@ -569,22 +569,48 @@ src/
 ├── encoding.rs        # Shared: compact_size, bech32, base58check
 ├── error.rs           # Unified SignerError enum
 ├── traits.rs          # KeyPair, Signer, Verifier traits
+├── atomic_swap.rs     # Cross-chain HTLC (Bitcoin P2WSH + Ethereum ABI)
 ├── bin/               # CLI tool (chains-sdk keygen/sign/verify/address)
 ├── bitcoin/
 │   ├── mod.rs         # ECDSA signer, WIF, P2PKH/P2WPKH, BIP-137
 │   ├── schnorr.rs     # BIP-340 Schnorr, P2TR addresses
 │   ├── taproot.rs     # BIP-341/342 Taproot scripts
+│   ├── tapscript.rs   # Tapscript builder, BIP-342 leaf hashing
 │   ├── sighash.rs     # BIP-143/341/342 sighash computation
 │   ├── transaction.rs # Transaction serialization, txid, vsize
 │   ├── message.rs     # BIP-322 sign + verify (P2WPKH / P2TR)
+│   ├── musig2_tx.rs   # MuSig2 Taproot transaction signing
+│   ├── miniscript.rs  # Miniscript compiler (policy → script)
+│   ├── silent_payments.rs # BIP-352 Silent Payments
+│   ├── ordinals.rs    # Bitcoin Ordinals inscriptions (Tapscript)
 │   ├── psbt/          # BIP-174 PSBT with auto-signing
 │   ├── descriptor.rs  # BIP-380-386 output descriptors
-│   ├── helpers.rs     # OP_RETURN, RBF, CPFP, Ordinals
+│   ├── helpers.rs     # OP_RETURN, RBF, CPFP
 │   └── scripts.rs     # HTLC, CLTV/CSV timelock, coin selection
-├── ethereum/          # EIP-191/712/155/2612/3009/4337/4494, ecrecover, Safe, proxy, smart wallet
+├── ethereum/
+│   ├── mod.rs         # ECDSA signer, EIP-191/712/155, ecrecover
+│   ├── abi.rs         # ABI encoding/decoding
+│   ├── eips.rs        # EIP-2612/3009/4494/6492/7702 helpers
+│   ├── rlp.rs         # RLP encoding/decoding
+│   ├── transaction.rs # EIP-1559/2930 transaction builder
+│   ├── keystore.rs    # EIP-2335 keystore (scrypt + AES-128-CTR)
+│   ├── safe.rs        # Gnosis Safe multisig (EIP-712)
+│   ├── proxy.rs       # UUPS/EIP-1967 proxy, Multicall3
+│   ├── smart_wallet.rs # Account abstraction (EIP-4337 v0.7)
+│   ├── siwe.rs        # Sign-In with Ethereum (EIP-4361)
+│   ├── userop.rs      # ERC-4337 UserOperation encoding
+│   ├── permit2.rs     # Uniswap Permit2 (EIP-712 signatures)
+│   └── uniswap_v4.rs  # Uniswap V4 swap/pool encoding
 ├── solana/
+│   ├── mod.rs         # EdDSA signer, Base58 address
 │   ├── transaction.rs # SPL Token, System, Compute Budget
-│   └── programs.rs    # ATA, Memo v2, Stake, Durable Nonce
+│   ├── programs.rs    # ATA, Memo v2, Stake, Durable Nonce
+│   ├── dex.rs         # Jupiter/Raydium DEX routing
+│   ├── token_extensions.rs # SPL Token-2022 extensions
+│   ├── metaplex.rs    # Metaplex NFT minting/metadata
+│   ├── staking.rs     # Native staking + Marinade Finance
+│   ├── governance.rs  # SPL Governance (DAO proposals/voting)
+│   └── jupiter_dca.rs # Jupiter DCA (Dollar-Cost Averaging)
 ├── xrp/
 │   ├── transaction.rs # Binary codec, Payment, TrustSet, multisign
 │   └── advanced.rs    # IOU amounts, DEX orders, Escrow
@@ -603,6 +629,8 @@ src/
 ├── hd_key.rs          # BIP-32/44 HD key derivation + xpub/xprv
 ├── mnemonic.rs        # BIP-39 seed phrases
 └── bip85.rs           # BIP-85 deterministic entropy
+
+fuzz/                  # cargo-fuzz harness (ABI, RLP, CT-hex, BIP-39, PSBT, Permit2)
 ```
 
 ## License

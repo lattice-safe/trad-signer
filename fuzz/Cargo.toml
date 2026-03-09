@@ -8,29 +8,43 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
+chains-sdk = { path = "..", features = [
+    "ethereum",
+    "bitcoin",
+    "solana",
+    "mnemonic",
+    "hd_key",
+    "bip85",
+    "serde",
+] }
 libfuzzer-sys = "0.4"
 
-[dependencies.chains-sdk]
-path = ".."
-features = ["bitcoin", "hd_key", "mnemonic"]
-
-# Fuzz targets
 [[bin]]
-name = "fuzz_from_wif"
-path = "fuzz_targets/fuzz_from_wif.rs"
+name = "fuzz_abi_decode"
+path = "fuzz_targets/fuzz_abi_decode.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_from_xprv"
-path = "fuzz_targets/fuzz_from_xprv.rs"
+name = "fuzz_rlp_decode"
+path = "fuzz_targets/fuzz_rlp_decode.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_psbt_deserialize"
-path = "fuzz_targets/fuzz_psbt_deserialize.rs"
+name = "fuzz_ct_hex"
+path = "fuzz_targets/fuzz_ct_hex.rs"
 doc = false
 
 [[bin]]
-name = "fuzz_mnemonic_from_phrase"
-path = "fuzz_targets/fuzz_mnemonic_from_phrase.rs"
+name = "fuzz_bip39_mnemonic"
+path = "fuzz_targets/fuzz_bip39_mnemonic.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_psbt_parse"
+path = "fuzz_targets/fuzz_psbt_parse.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_permit2_hash"
+path = "fuzz_targets/fuzz_permit2_hash.rs"
 doc = false
