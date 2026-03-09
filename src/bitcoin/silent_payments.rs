@@ -81,6 +81,7 @@ pub fn create_address(
 /// Parse a Silent Payment address.
 ///
 /// Extracts the scan and spend public keys from the address format `{hrp}:{payload_hex}`.
+#[must_use = "parsed address should be used"]
 pub fn parse_address(address: &str) -> Result<SilentPaymentAddress, SignerError> {
     let sep_pos = address.find(':')
         .ok_or_else(|| SignerError::ParseError("no separator in SP address".into()))?;
@@ -117,6 +118,7 @@ pub fn parse_address(address: &str) -> Result<SilentPaymentAddress, SignerError>
 // ═══════════════════════════════════════════════════════════════════
 
 /// Derive a compressed public key from a 32-byte secret key.
+#[must_use = "derived public key should be used"]
 pub fn pubkey_from_secret(secret: &[u8; 32]) -> Result<[u8; 33], SignerError> {
     let scalar = parse_scalar(secret)?;
     let point = ProjectivePoint::GENERATOR * scalar;
@@ -185,6 +187,7 @@ pub fn derive_output_key(
 /// Compute the input hash for BIP-352 from the transaction's outpoints.
 ///
 /// `input_hash = tagged_hash("BIP0352/Inputs", smallest_outpoint || sum_input_pubkeys)`
+#[must_use = "input hash should be used"]
 pub fn compute_input_hash(
     outpoints: &[([u8; 32], u32)],
     sum_input_pubkeys: &[u8; 33],
@@ -218,6 +221,7 @@ pub fn compute_input_hash(
 }
 
 /// Sum multiple public keys (EC point addition).
+#[must_use = "summed public key should be used"]
 pub fn sum_pubkeys(pubkeys: &[[u8; 33]]) -> Result<[u8; 33], SignerError> {
     if pubkeys.is_empty() {
         return Err(SignerError::ParseError("no pubkeys to sum".into()));
@@ -238,6 +242,7 @@ pub fn sum_pubkeys(pubkeys: &[[u8; 33]]) -> Result<[u8; 33], SignerError> {
 /// Apply a label tweak to a spend public key.
 ///
 /// `labeled_spend = spend_pubkey + label_tweak * G`
+#[must_use = "labeled public key should be used"]
 pub fn apply_label(
     spend_pubkey: &[u8; 33],
     label_tweak: &[u8; 32],

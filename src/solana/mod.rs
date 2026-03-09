@@ -105,12 +105,15 @@ impl traits::Signer for SolanaSigner {
         })
     }
 
-    /// **Note:** Ed25519 hashes internally per RFC 8032. This method is identical to
-    /// `sign()` — the `digest` parameter is treated as a raw message, not a
-    /// pre-computed hash. For consistency with the `Signer` trait, this is provided as-is.
+    /// # ⚠️ Not Actually Pre-Hashed
+    ///
+    /// Ed25519 hashes internally per RFC 8032. This method is **identical to
+    /// `sign()`** — the `digest` parameter is treated as a raw message, not a
+    /// pre-computed hash. Passing a SHA-256 digest here will sign the digest
+    /// bytes as a message, NOT use them as a pre-computed hash.
+    ///
+    /// Provided for trait consistency only.
     fn sign_prehashed(&self, digest: &[u8]) -> Result<SolanaSignature, SignerError> {
-        // Ed25519 has no internal pre-hashing in Solana context.
-        // sign_prehashed is equivalent to sign (the caller provides the raw payload).
         self.sign(digest)
     }
 
