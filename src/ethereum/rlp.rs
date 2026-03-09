@@ -274,7 +274,10 @@ fn decode_items_in_range(
 }
 
 fn read_be_usize(data: &[u8], offset: usize, len: usize) -> Result<usize, SignerError> {
-    if offset + len > data.len() {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| SignerError::ParseError("RLP: length offset overflow".into()))?;
+    if end > data.len() {
         return Err(SignerError::ParseError("RLP: length truncated".into()));
     }
     if len > 8 {
@@ -287,8 +290,10 @@ fn read_be_usize(data: &[u8], offset: usize, len: usize) -> Result<usize, Signer
         ));
     }
     let mut buf = [0u8; 8];
-    buf[8 - len..].copy_from_slice(&data[offset..offset + len]);
-    Ok(u64::from_be_bytes(buf) as usize)
+    buf[8 - len..].copy_from_slice(&data[offset..end]);
+    let val = u64::from_be_bytes(buf);
+    usize::try_from(val)
+        .map_err(|_| SignerError::ParseError("RLP: length exceeds platform usize".into()))
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────
@@ -410,6 +415,14 @@ mod tests {
         let mut encoded = encode_bytes(b"hello");
         encoded.push(0xFF); // trailing junk
         assert!(decode(&encoded).is_err());
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_rlp_read_be_usize_rejects_overflow_on_32bit() {
+        // 0x0000000100000000 = 2^32, does not fit in 32-bit usize.
+        let bytes = [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
+        assert!(read_be_usize(&bytes, 0, 8).is_err());
     }
 
     #[test]

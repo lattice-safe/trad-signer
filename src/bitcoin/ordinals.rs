@@ -318,19 +318,29 @@ fn push_data(script: &mut Vec<u8>, data: &[u8]) {
     let len = data.len();
     if len == 0 {
         script.push(OP_FALSE);
-    } else if len <= 75 {
+        return;
+    }
+
+    if len <= 75 {
         script.push(len as u8);
-        script.extend_from_slice(data);
     } else if len <= 255 {
         script.push(0x4C); // OP_PUSHDATA1
         script.push(len as u8);
-        script.extend_from_slice(data);
-    } else if len <= 520 {
+    } else if len <= 0xFFFF {
         script.push(0x4D); // OP_PUSHDATA2
         script.extend_from_slice(&(len as u16).to_le_bytes());
-        script.extend_from_slice(data);
+    } else {
+        script.push(0x4E); // OP_PUSHDATA4
+        if len > u32::MAX as usize {
+            #[allow(clippy::panic)]
+            {
+                panic!("script push length exceeds u32::MAX");
+            }
+        }
+        script.extend_from_slice(&(len as u32).to_le_bytes());
     }
-    // Larger pushes should not occur (body is chunked at 520)
+
+    script.extend_from_slice(data);
 }
 
 /// Push a u32 in little-endian, trimming trailing zeros.
@@ -635,5 +645,25 @@ mod tests {
         let mut s = Vec::new();
         push_data(&mut s, b"");
         assert_eq!(s, vec![OP_FALSE]);
+    }
+
+    #[test]
+    fn test_push_data_over_520_not_dropped() {
+        let mut s = Vec::new();
+        let data = vec![0xCC; 600];
+        push_data(&mut s, &data);
+        assert_eq!(s[0], 0x4D); // OP_PUSHDATA2
+        let len = u16::from_le_bytes([s[1], s[2]]);
+        assert_eq!(len, 600);
+        assert_eq!(&s[3..], &data[..]);
+    }
+
+    #[test]
+    fn test_tapscript_large_metadata_not_dropped() {
+        let metadata = vec![0xA5; 600];
+        let ins = Inscription::new("text/plain", b"x").with_metadata(metadata.clone());
+        let script = ins.to_tapscript();
+        assert!(script.windows(3).any(|w| w == [0x4D, 0x58, 0x02]));
+        assert!(script.windows(600).any(|w| w == metadata.as_slice()));
     }
 }

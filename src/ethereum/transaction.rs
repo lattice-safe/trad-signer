@@ -554,6 +554,11 @@ fn decode_legacy_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction,
 
     // EIP-155: chain_id = (v - 35) / 2
     let (chain_id, recovery_id) = if v >= 35 {
+        if v <= 36 {
+            return Err(SignerError::ParseError(format!(
+                "legacy tx: non-canonical EIP-155 v value {v}"
+            )));
+        }
         ((v - 35) / 2, ((v - 35) % 2) as u8)
     } else if v == 27 || v == 28 {
         (0, (v - 27) as u8)
@@ -1203,6 +1208,28 @@ mod tests {
     #[test]
     fn test_decode_unknown_type_rejected() {
         assert!(decode_signed_tx(&[0x04, 0x00]).is_err());
+    }
+
+    #[test]
+    fn test_decode_legacy_rejects_non_canonical_eip155_v_35() {
+        let mut items = Vec::new();
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(0)); // nonce
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(1)); // gas_price
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(21_000)); // gas_limit
+        items.extend_from_slice(&crate::ethereum::rlp::encode_bytes(&[0x11; 20])); // to
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(0)); // value
+        items.extend_from_slice(&crate::ethereum::rlp::encode_bytes(&[])); // data
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(35)); // invalid/non-canonical
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(1)); // r
+        items.extend_from_slice(&crate::ethereum::rlp::encode_u64(1)); // s
+        let raw = crate::ethereum::rlp::encode_list(&items);
+
+        match decode_signed_tx(&raw) {
+            Err(SignerError::ParseError(msg)) => {
+                assert!(msg.contains("non-canonical EIP-155 v value"));
+            }
+            other => panic!("expected ParseError for non-canonical v, got {other:?}"),
+        }
     }
 
     #[test]

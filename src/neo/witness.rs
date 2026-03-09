@@ -77,6 +77,20 @@ impl Witness {
                 n
             )));
         }
+        if signatures.len() < threshold as usize {
+            return Err(crate::error::SignerError::ParseError(format!(
+                "multisig: signature count {} below threshold {}",
+                signatures.len(),
+                threshold
+            )));
+        }
+        if signatures.len() > n {
+            return Err(crate::error::SignerError::ParseError(format!(
+                "multisig: signature count {} exceeds key count {}",
+                signatures.len(),
+                n
+            )));
+        }
 
         // Invocation: push each signature
         let mut inv = Vec::new();
@@ -328,6 +342,36 @@ mod tests {
         // Invocation should have 2 signature pushes
         // Each: 1 + 1 + 64 = 66, total = 132
         assert_eq!(w.invocation_script.len(), 132);
+    }
+
+    #[test]
+    fn test_multisig_witness_supports_threshold_above_16() {
+        let sigs = [[0xAB; 64]; 17];
+        let mut pks = [[0u8; 33]; 17];
+        for (i, pk) in pks.iter_mut().enumerate() {
+            pk[0] = 0x02;
+            pk[32] = i as u8;
+        }
+
+        let w = Witness::from_multisig(&sigs, &pks, 17).unwrap();
+
+        // Threshold 17 should be explicitly encoded as PUSHINT8 (0x00) + 0x11.
+        assert_eq!(w.verification_script[0], 0x00);
+        assert_eq!(w.verification_script[1], 17);
+
+        // After 17 public key pushes (17 * (PUSHDATA1 + len + 33 bytes)),
+        // key count N should also be explicitly encoded as 17.
+        let n_offset = 2 + 17 * 35;
+        assert_eq!(w.verification_script[n_offset], 0x00);
+        assert_eq!(w.verification_script[n_offset + 1], 17);
+        assert_eq!(w.verification_script[n_offset + 2], 0x41); // SYSCALL
+    }
+
+    #[test]
+    fn test_multisig_witness_rejects_signature_count_mismatch() {
+        let sigs = [SIG]; // only 1 signature
+        let pks = [PUBKEY, [0x03; 33]];
+        assert!(Witness::from_multisig(&sigs, &pks, 2).is_err());
     }
 
     // ─── NEP-11 Tests ───────────────────────────────────────────

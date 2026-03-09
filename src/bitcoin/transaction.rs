@@ -202,6 +202,12 @@ impl Transaction {
 pub fn parse_unsigned_tx(data: &[u8]) -> Result<Transaction, crate::error::SignerError> {
     use crate::error::SignerError;
 
+    // Minimal serialized sizes used for sanity checks before allocation:
+    // input  = outpoint(36) + script_len varint(>=1) + sequence(4)
+    // output = value(8) + script_len varint(>=1)
+    const MIN_INPUT_BYTES: usize = 41;
+    const MIN_OUTPUT_BYTES: usize = 9;
+
     /// Convert u64 to usize, rejecting overflow on 32-bit platforms.
     fn safe_usize(val: u64) -> Result<usize, SignerError> {
         usize::try_from(val).map_err(|_| {
@@ -220,6 +226,15 @@ pub fn parse_unsigned_tx(data: &[u8]) -> Result<Transaction, crate::error::Signe
 
     // input count
     let input_count = safe_usize(encoding::read_compact_size(data, &mut off)?)?;
+
+    // Reject impossible counts early to avoid unbounded allocation attempts.
+    let remaining_after_input_count = data.len().saturating_sub(off);
+    let max_possible_inputs = remaining_after_input_count / MIN_INPUT_BYTES;
+    if input_count > max_possible_inputs {
+        return Err(SignerError::ParseError(format!(
+            "tx: input count {input_count} exceeds possible maximum {max_possible_inputs}"
+        )));
+    }
 
     let mut inputs = Vec::with_capacity(input_count);
     for _ in 0..input_count {
@@ -259,6 +274,22 @@ pub fn parse_unsigned_tx(data: &[u8]) -> Result<Transaction, crate::error::Signe
 
     // output count
     let output_count = safe_usize(encoding::read_compact_size(data, &mut off)?)?;
+
+    let remaining_after_output_count = data
+        .len()
+        .checked_sub(off)
+        .ok_or_else(|| SignerError::ParseError("tx: output count offset overflow".into()))?;
+    if remaining_after_output_count < 4 {
+        return Err(SignerError::ParseError(
+            "tx truncated before locktime".into(),
+        ));
+    }
+    let max_possible_outputs = (remaining_after_output_count - 4) / MIN_OUTPUT_BYTES;
+    if output_count > max_possible_outputs {
+        return Err(SignerError::ParseError(format!(
+            "tx: output count {output_count} exceeds possible maximum {max_possible_outputs}"
+        )));
+    }
 
     let mut outputs = Vec::with_capacity(output_count);
     for _ in 0..output_count {
@@ -911,5 +942,31 @@ mod tests {
         // At 50 sat/vB
         let fee_high = estimate_fee(&tx, 50);
         assert_eq!(fee_high, vsize as u64 * 50);
+    }
+
+    #[test]
+    fn test_parse_unsigned_tx_rejects_unreasonable_input_count() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&1u32.to_le_bytes()); // version
+        raw.push(0xFD); // CompactSize u16
+        raw.extend_from_slice(&0xFFFFu16.to_le_bytes()); // 65_535 inputs
+
+        assert!(parse_unsigned_tx(&raw).is_err());
+    }
+
+    #[test]
+    fn test_parse_unsigned_tx_rejects_unreasonable_output_count() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&1u32.to_le_bytes()); // version
+        raw.push(0x01); // 1 input
+        raw.extend_from_slice(&[0u8; 32]); // prev txid
+        raw.extend_from_slice(&0u32.to_le_bytes()); // prev vout
+        raw.push(0x00); // scriptSig len
+        raw.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // sequence
+        raw.push(0xFD); // CompactSize u16
+        raw.extend_from_slice(&0xFFFFu16.to_le_bytes()); // 65_535 outputs
+        raw.extend_from_slice(&0u32.to_le_bytes()); // locktime
+
+        assert!(parse_unsigned_tx(&raw).is_err());
     }
 }

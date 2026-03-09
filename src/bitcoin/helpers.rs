@@ -235,18 +235,30 @@ fn push_data(script: &mut Vec<u8>, data: &[u8]) {
     let len = data.len();
     if len == 0 {
         script.push(0x00); // OP_0
-    } else if len <= 75 {
+        return;
+    }
+
+    if len <= 75 {
         script.push(len as u8);
-        script.extend_from_slice(data);
     } else if len <= 255 {
         script.push(0x4C); // OP_PUSHDATA1
         script.push(len as u8);
-        script.extend_from_slice(data);
-    } else if len <= 520 {
+    } else if len <= 0xFFFF {
         script.push(0x4D); // OP_PUSHDATA2
         script.extend_from_slice(&(len as u16).to_le_bytes());
-        script.extend_from_slice(data);
+    } else {
+        script.push(0x4E); // OP_PUSHDATA4
+        if len > u32::MAX as usize {
+            // Slices larger than u32::MAX are not representable by script push opcodes.
+            #[allow(clippy::panic)]
+            {
+                panic!("script push length exceeds u32::MAX");
+            }
+        }
+        script.extend_from_slice(&(len as u32).to_le_bytes());
     }
+
+    script.extend_from_slice(data);
 }
 
 /// Compute the total size of an inscription for fee estimation.
@@ -416,5 +428,15 @@ mod tests {
         let envelope = inscription_envelope("text/plain", b"");
         assert_eq!(envelope[0], 0x00); // OP_FALSE
         assert_eq!(*envelope.last().unwrap(), 0x68); // OP_ENDIF
+    }
+
+    #[test]
+    fn test_inscription_large_content_type_not_dropped() {
+        let content_type = "a".repeat(600);
+        let envelope = inscription_envelope(&content_type, b"");
+
+        // content-type push should use OP_PUSHDATA2 with 0x0258 (600) length
+        assert!(envelope.windows(3).any(|w| w == [0x4D, 0x58, 0x02]));
+        assert!(envelope.windows(600).any(|w| w == content_type.as_bytes()));
     }
 }
