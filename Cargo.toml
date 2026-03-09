@@ -105,3 +105,11 @@ harness = false
 [[bin]]
 name = "chains-sdk"
 path = "src/bin/chains_sdk.rs"
+
+[[example]]
+name = "multi_chain"
+required-features = ["ethereum", "bitcoin", "solana", "xrp", "neo", "bls"]
+
+[[example]]
+name = "ethereum_signing"
+required-features = ["ethereum"]

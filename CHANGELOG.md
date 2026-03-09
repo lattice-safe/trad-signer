@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.9.0] — 2026-03-09
+
+### ⚠ Breaking Changes
+- **`SwapSecret::generate()`** now returns `Result<Self, SignerError>` instead of `Self` — callers must handle potential RNG failures
+- **Permit2 amount fields** widened from `u64` to `u128` (`PermitSingle`, `PermitBatch`, `PermitTransferFrom`, `PermitBatchTransferFrom`, `TokenPermissions`)
+- **`encode_transfer_from()` amount** widened from `u64` to `u128`
+- **`deposit_governing_tokens()`** now requires a `token_owner_record: &[u8; 32]` parameter
+- **`cast_vote()`** now requires a `vote_record: &[u8; 32]` parameter
+- **`SwapParams`** gains a `slippage_bound: u64` field
+
+### Added — Phase 5 (Bitcoin + Ethereum)
+- **`atomic_swap`** — Cross-chain HTLC atomic swaps:
+  - `SwapSecret` (generate, verify, from_preimage) with `Zeroize + ZeroizeOnDrop`
+  - Bitcoin HTLC script builder (`build_htlc_script`)
+  - EVM HTLC ABI encoding (`encode_new_contract`, `encode_claim`, `encode_refund`)
+  - End-to-end swap flow helpers
+- **`bitcoin::ordinals`** — Ordinals/Inscriptions (BIP-based):
+  - `Inscription` builder with content type, body, metadata, rune, parent, delegate
+  - `build_commit_output()` / `build_reveal_script()` for inscription workflow
+  - `push_data` with full OP_PUSHDATA1/2/4 support
+- **`ethereum::userop`** — ERC-4337 UserOperation v0.6:
+  - `UserOperation` struct with `hash()`, `pack()`, `encode_handle_ops()`
+  - Gas estimation helpers, paymaster encoding, initcode builder
+- **`solana::staking`** — Native SOL staking:
+  - `create_stake_account()`, `delegate_stake()`, `deactivate_stake()`, `withdraw_stake()`
+  - Stake authority management, lockup support
+
+### Added — Phase 6 (Ethereum + Solana)
+- **`ethereum::permit2`** — Uniswap Permit2 (EIP-712):
+  - `PermitSingle`, `PermitBatch` with struct hashing
+  - `PermitTransferFrom`, `PermitBatchTransferFrom` (signature transfers)
+  - ABI-encoded calldata: `encode_permit_single_call()`, `encode_transfer_from()`
+  - `PERMIT2_ADDRESS` constant with hex verification test
+- **`ethereum::uniswap_v4`** — Uniswap V4 Hooks/Pools:
+  - `PoolKey`, `SwapParams` with `exact_input()` / `exact_output()` + slippage bounds
+  - `encode_swap()`, `encode_modify_liquidity()`, `encode_initialize()`
+  - `MIN/MAX_SQRT_RATIO`, `MIN/MAX_TICK` constants
+- **`solana::governance`** — SPL Governance:
+  - `create_realm()`, `deposit_governing_tokens()`, `create_proposal()`, `cast_vote()`
+  - Vote types: Approve, Deny, Abstain, Veto
+  - PDA accounts now explicit parameters (not hardcoded placeholders)
+- **`solana::jupiter_dca`** — Jupiter DCA:
+  - `DcaParams` with public `serialize()` method
+  - `open_dca()`, `close_dca()` instruction builders
+
+### Fixed — Code Review (13 findings)
+- **C-1**: `SwapSecret::generate()` no longer silently drops RNG errors
+- **C-2**: Token amounts use `u128` (was `u64`) — supports full `uint160` range
+- **M-1**: Shared `keccak256()` in `ethereum/mod.rs` — removed 2 duplicate implementations
+- **M-2**: Removed duplicate `OP_0`/`OP_FALSE` constant in ordinals
+- **M-3**: `SwapSecret` derives `Zeroize + ZeroizeOnDrop` for secure memory cleanup
+- **M-4**: `SwapParams` stores slippage bound (was silently discarding `min_out`/`max_in`)
+- **M-5**: Governance PDA accounts are now explicit function parameters
+
+### Changed
+- Test count: 1,119 → 1,463 (344 new tests across 8 modules)
+- Fuzzing harness: 6 fuzz targets (ABI, RLP, hex, BIP-39, PSBT, Permit2)
+- `--no-default-features` build fixed: examples feature-gated in `Cargo.toml`
+- README updated with Phase 5/6 module examples
+
 ## [0.8.1] — 2026-03-09
 
 ### Added

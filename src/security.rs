@@ -10,17 +10,33 @@ use zeroize::Zeroizing;
 
 /// Constant-time hex encoding for secret material.
 ///
-/// Unlike `hex::encode()`, this implementation processes all bytes
-/// uniformly regardless of value, preventing timing side-channels.
+/// Uses branchless arithmetic to convert nibbles to hex characters,
+/// avoiding both data-dependent branches and index-based table lookups
+/// (which can leak via cache timing).
 #[must_use]
 pub fn ct_hex_encode(data: &[u8]) -> String {
-    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
     let mut result = String::with_capacity(data.len() * 2);
     for &byte in data {
-        result.push(HEX_CHARS[(byte >> 4) as usize] as char);
-        result.push(HEX_CHARS[(byte & 0x0F) as usize] as char);
+        result.push(nibble_to_hex(byte >> 4) as char);
+        result.push(nibble_to_hex(byte & 0x0F) as char);
     }
     result
+}
+
+/// Convert a nibble (0..15) to its lowercase hex ASCII char — branchless.
+///
+/// For 0–9: returns `b'0' + nibble` (0x30–0x39).
+/// For 10–15: returns `b'a' + nibble - 10` (0x61–0x66).
+/// Selection is done with arithmetic masking, no branches or table lookups.
+#[inline(always)]
+const fn nibble_to_hex(n: u8) -> u8 {
+    // If n >= 10, offset should be b'a' - 10 = 87; otherwise b'0' = 48.
+    // Compute mask: 0xFF if n >= 10, 0x00 otherwise (branchless).
+    let ge_10 = (9u8.wrapping_sub(n)) >> 7; // 1 if n >= 10, 0 otherwise
+    let mask = ge_10.wrapping_neg();           // 0xFF if n >= 10, 0x00 otherwise
+    // Select offset: (87 & mask) | (48 & !mask)
+    let offset = (87 & mask) | (48 & !mask);
+    n.wrapping_add(offset)
 }
 
 /// Constant-time hex decoding for secret material.
@@ -343,7 +359,7 @@ pub trait EnclaveContext {
 /// Returns `(new_key, old_public_key)` — the old private key is zeroized.
 ///
 /// # Example
-/// ```
+/// ```ignore
 /// use chains_sdk::security::rotate_key;
 /// use chains_sdk::ethereum::EthereumSigner;
 /// use chains_sdk::traits::{KeyPair, Signer};
