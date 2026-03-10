@@ -770,3 +770,152 @@ mod frost_large {
         assert!(signing::verify(&sig, &kgen.group_public_key, msg).unwrap());
     }
 }
+
+// ─── BLS Multi-Message Attestation (ETH2 Pattern) ──────────────────
+
+#[cfg(feature = "bls")]
+mod bls_multi_message_attestation {
+    use chains_sdk::ethereum::bls::{
+        aggregate_signatures, verify_aggregated_multi, BlsSigner,
+    };
+    use chains_sdk::traits::{KeyPair, Signer};
+
+    /// ETH2 attestation pattern: N validators each sign a DIFFERENT message
+    /// (different slot attestations), signatures are aggregated, and a single
+    /// aggregate_verify_multi checks all (pk, msg) pairs.
+    #[test]
+    fn test_bls_multi_message_attestation_5_validators() {
+        let validators: Vec<BlsSigner> = (0..5).map(|_| BlsSigner::generate().unwrap()).collect();
+
+        // Each validator attests to a different slot
+        let messages: Vec<Vec<u8>> = (100..105)
+            .map(|slot| format!("attestation slot {slot}").into_bytes())
+            .collect();
+
+        let sigs: Vec<_> = validators
+            .iter()
+            .zip(messages.iter())
+            .map(|(v, m)| v.sign(m).unwrap())
+            .collect();
+
+        let agg = aggregate_signatures(&sigs).unwrap();
+
+        // Build (pubkey, message) pairs
+        let pairs: Vec<_> = validators
+            .iter()
+            .zip(messages.iter())
+            .map(|(v, m)| (v.public_key(), m.as_slice()))
+            .collect();
+
+        // Aggregate verification must succeed
+        assert!(verify_aggregated_multi(&pairs, &agg).unwrap());
+
+        // Swapping a message must fail
+        let mut bad_pairs = pairs.clone();
+        bad_pairs[0].1 = b"wrong attestation";
+        assert!(!verify_aggregated_multi(&bad_pairs, &agg).unwrap());
+    }
+}
+
+// ─── All-Chain Address Validation Integration ──────────────────────
+
+#[cfg(all(
+    feature = "ethereum",
+    feature = "bitcoin",
+    feature = "solana",
+    feature = "xrp",
+    feature = "neo"
+))]
+mod all_chain_address_validation {
+    use chains_sdk::traits::KeyPair;
+
+    /// Generate keys for all 5 chains and validate every generated address.
+    #[test]
+    fn test_all_chain_generated_addresses_valid() {
+        // Ethereum
+        let eth = chains_sdk::ethereum::EthereumSigner::generate().unwrap();
+        let eth_addr = eth.address_checksum();
+        assert!(chains_sdk::ethereum::validate_address(&eth_addr));
+
+        // Bitcoin P2PKH + P2WPKH
+        let btc = chains_sdk::bitcoin::BitcoinSigner::generate().unwrap();
+        let p2pkh = btc.p2pkh_address();
+        let p2wpkh = btc.p2wpkh_address().unwrap();
+        assert!(chains_sdk::bitcoin::validate_address(&p2pkh));
+        assert!(chains_sdk::bitcoin::validate_address(&p2wpkh));
+
+        // Bitcoin P2TR
+        let schnorr = chains_sdk::bitcoin::schnorr::SchnorrSigner::generate().unwrap();
+        let p2tr = schnorr.p2tr_address().unwrap();
+        assert!(chains_sdk::bitcoin::validate_address(&p2tr));
+
+        // Solana
+        let sol = chains_sdk::solana::SolanaSigner::generate().unwrap();
+        let sol_addr = sol.address();
+        assert!(chains_sdk::solana::validate_address(&sol_addr));
+
+        // XRP (ECDSA)
+        let xrp = chains_sdk::xrp::XrpEcdsaSigner::generate().unwrap();
+        let xrp_addr = xrp.address().unwrap();
+        assert!(chains_sdk::xrp::validate_address(&xrp_addr));
+
+        // XRP (EdDSA)
+        let xrp_ed = chains_sdk::xrp::XrpEddsaSigner::generate().unwrap();
+        let xrp_ed_addr = xrp_ed.address().unwrap();
+        assert!(chains_sdk::xrp::validate_address(&xrp_ed_addr));
+
+        // NEO
+        let neo = chains_sdk::neo::NeoSigner::generate().unwrap();
+        let neo_addr = neo.address();
+        assert!(chains_sdk::neo::validate_address(&neo_addr));
+    }
+}
+
+// ─── NEO + XRP WIF/X-Address Integration ───────────────────────────
+
+#[cfg(all(feature = "neo", feature = "xrp"))]
+mod neo_xrp_integration {
+    use chains_sdk::traits::{KeyPair, Signer, Verifier};
+
+    /// NEO WIF roundtrip + signing verification
+    #[test]
+    fn test_neo_wif_roundtrip_sign_verify() {
+        let signer = chains_sdk::neo::NeoSigner::generate().unwrap();
+        let wif = signer.to_wif();
+        let restored = chains_sdk::neo::NeoSigner::from_wif(&wif).unwrap();
+
+        // Same key
+        assert_eq!(signer.public_key_bytes(), restored.public_key_bytes());
+
+        // Sign with original, verify with restored
+        let msg = b"WIF roundtrip signing";
+        let sig = signer.sign(msg).unwrap();
+        let verifier =
+            chains_sdk::neo::NeoVerifier::from_public_key_bytes(&restored.public_key_bytes())
+                .unwrap();
+        assert!(verifier.verify(msg, &sig).unwrap());
+    }
+
+    /// XRP X-Address roundtrip with destination tag
+    #[test]
+    fn test_xrp_x_address_sign_flow() {
+        let signer = chains_sdk::xrp::XrpEcdsaSigner::generate().unwrap();
+        let acct_id = signer.account_id();
+
+        // Encode X-Address with tag
+        let x_addr = chains_sdk::xrp::encode_x_address(&acct_id, Some(42), false).unwrap();
+        let (decoded_acct, tag, is_testnet) = chains_sdk::xrp::decode_x_address(&x_addr).unwrap();
+
+        assert_eq!(decoded_acct, acct_id);
+        assert_eq!(tag, Some(42));
+        assert!(!is_testnet);
+
+        // Sign and verify
+        let msg = b"X-Address payment";
+        let sig = signer.sign(msg).unwrap();
+        let verifier =
+            chains_sdk::xrp::XrpEcdsaVerifier::from_public_key_bytes(&signer.public_key_bytes())
+                .unwrap();
+        assert!(verifier.verify(msg, &sig).unwrap());
+    }
+}

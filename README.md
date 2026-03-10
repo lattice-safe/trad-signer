@@ -22,7 +22,7 @@
 
 ```toml
 [dependencies]
-chains-sdk = "0.9"
+chains-sdk = "1.0"
 ```
 
 ---
@@ -474,7 +474,7 @@ All modules are enabled by default. Disable unused ones to reduce compile time:
 
 ```toml
 [dependencies]
-chains-sdk = { version = "0.9", default-features = false, features = ["ethereum", "frost"] }
+chains-sdk = { version = "1.0", default-features = false, features = ["ethereum", "frost"] }
 ```
 
 | Feature | Description |
@@ -515,7 +515,7 @@ Run with `cargo bench --all-features`. Covers all chains + threshold signing:
 - Constant-time comparisons via `subtle::ConstantTimeEq`
 - FROST nonces are single-use `Zeroizing<Scalar>` with drop guards
 - `cargo audit`: **0 vulnerabilities** across 175+ dependencies
-- **1,500+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, EIP-2612, EIP-4337, ERC-4337, and FIPS 186-4 vectors
+- **1,800+ tests** including NIST SHA-256, BIP-32, BIP-39, BIP-85, BIP-137, BIP-143, BIP-174, BIP-322, BIP-327, BIP-340, BIP-341, BIP-342, RFC 6979, RFC 8032, RFC 9591, EIP-2333, EIP-2612, EIP-4337, ERC-4337, and FIPS 186-4 vectors
 
 ### Enclave / Confidential Computing
 

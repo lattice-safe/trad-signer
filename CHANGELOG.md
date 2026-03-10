@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.0.0] — 2026-03-11
+
+### 🎉 Production-Ready Release
+
+Marks the completion of a comprehensive three-phase security audit cycle across all modules, BIP/EIP/RFC compliance verification, and full test vector validation.
+
+### Fixed — Deep Audit Security Findings
+- **NEO `from_wif()`**: Constant-time checksum comparison via `subtle::ConstantTimeEq` (was timing-attackable `!=`)
+- **XRP `decode_x_address()`**: Constant-time checksum comparison via `subtle::ConstantTimeEq`
+- **Bitcoin `validate_base58check()`**: Constant-time checksum comparison via `subtle::ConstantTimeEq`
+
+### Added — Test Vectors
+- **BIP-32 Vector 3** (edge-case seed) — master + m/0' with xprv/xpub verification
+- **BIP-32 xpub derivation consistency** — verifies public-only normal child derivation matches private path for indices 0-4
+- **BIP-85 xprv import consistency** — verifies `from_xprv` and `from_seed` produce identical entropy derivations
+- **BIP-85 entropy validation** — determinism, non-zero, mnemonic parseability checks
+
+### Added — Integration Tests
+- **BLS multi-message attestation** — 5 validators sign different slot attestations, aggregate verify via `verify_aggregated_multi`
+- **All-chain address validation** — generates keys for all 5 chains (ETH, BTC, SOL, XRP, NEO) across 7 address formats and validates each
+- **NEO WIF roundtrip** — export → import → sign → verify chain
+- **XRP X-Address roundtrip** — encode with destination tag → decode → verify account_id and tag preservation
+
+### Changed
+- Test count: 1,614 → 1,805 (1,534 unit + 50 integration + 42 doc + 179 other)
+- 0 clippy warnings across all features with `-D warnings`
+- All constant-time checksums unified: every Base58Check decode path uses `subtle::ConstantTimeEq`
+
+### Verified Standards Compliance
+- **BIP**: 32, 39, 44, 84, 85, 86, 137, 143, 174, 322, 327, 340, 341, 342, 380-386
+- **EIP**: 2, 55, 155, 191, 712, 1559, 2333, 2334, 2335, 2612, 2718, 2930, 3009, 3074, 4337, 4494, 4844, 6492, 7702
+- **RFC**: 6979, 8032, 9591
+
 ## [0.9.0] — 2026-03-09
 
 ### ⚠ Breaking Changes
