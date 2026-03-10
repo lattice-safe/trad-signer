@@ -32,24 +32,26 @@ chains-sdk = "0.9"
 ```rust
 use chains_sdk::ethereum::EthereumSigner;
 use chains_sdk::traits::{KeyPair, Signer};
+use chains_sdk::ethereum::ecrecover;
 
 // Generate a new key pair
 let signer = EthereumSigner::generate()?;
 println!("Address: {}", signer.address_checksum()); // 0x...
 
 // Sign a message (EIP-191 personal_sign)
-let sig = signer.sign(b"hello world")?;
-println!("r: 0x{}", hex::encode(sig.r));
-println!("s: 0x{}", hex::encode(sig.s));
-println!("v: {}", sig.v); // 27 or 28
+let personal_sig = signer.sign(b"hello world")?;
+println!("r: 0x{}", hex::encode(personal_sig.r));
+println!("s: 0x{}", hex::encode(personal_sig.s));
+println!("v: {}", personal_sig.v); // 27 or 28
 
-// EIP-155 chain-aware signing
-let sig = signer.sign_with_chain_id(b"tx data", 1)?;   // Mainnet
-let sig = signer.sign_with_chain_id(b"tx data", 137)?;  // Polygon
+// EIP-155 chain-aware signing (chain_id must be non-zero)
+let mainnet_sig = signer.sign_with_chain_id(b"tx data", 1)?;    // Mainnet
+let polygon_sig = signer.sign_with_chain_id(b"tx data", 137)?;  // Polygon
+assert!(mainnet_sig.v >= 37);
+assert!(polygon_sig.v > 255);
 
 // ecrecover (recover address from signature)
-use chains_sdk::ethereum::ecrecover;
-let recovered = ecrecover(b"hello world", &sig)?;
+let recovered = ecrecover(b"hello world", &personal_sig)?;
 assert_eq!(recovered, signer.address());
 ```
 
@@ -58,7 +60,7 @@ assert_eq!(recovered, signer.address());
 ## Gnosis Safe Multisig
 
 ```rust
-use chains_sdk::ethereum::safe::{SafeTransaction, Operation, safe_domain_separator, encode_signatures};
+use chains_sdk::ethereum::safe::{SafeTransaction, Operation, safe_domain_separator};
 use chains_sdk::ethereum::EthereumSigner;
 use chains_sdk::traits::KeyPair;
 
@@ -82,7 +84,7 @@ let tx = SafeTransaction {
 let sig = tx.sign(&signer, &domain)?;
 
 // Build execTransaction calldata
-let calldata = tx.encode_exec_transaction(&[sig]);
+let calldata = tx.encode_exec_transaction(&[sig])?;
 
 // Owner management
 use chains_sdk::ethereum::safe;
@@ -120,15 +122,17 @@ let batch = proxy::encode_multicall(&calls);
 ## Smart Wallet / Account Abstraction (EIP-4337 v0.7)
 
 ```rust
-use chains_sdk::ethereum::smart_wallet::{PackedUserOperation, encode_execute, encode_execute_batch, ExecuteCall};
+use chains_sdk::ethereum::smart_wallet::{
+    PackedUserOperation, ExecuteCall, encode_execute, encode_execute_batch, uint256_from_u64,
+};
 
 // Smart wallet execute
-let calldata = encode_execute([0xBB; 20], 0, &transfer_data);
+let calldata = encode_execute([0xBB; 20], uint256_from_u64(0), &transfer_data);
 
 // Batch execution
 let calls = vec![
-    ExecuteCall { target: [0xAA; 20], value: 0, data: vec![0x01] },
-    ExecuteCall { target: [0xBB; 20], value: 100, data: vec![0x02] },
+    ExecuteCall { target: [0xAA; 20], value: uint256_from_u64(0), data: vec![0x01] },
+    ExecuteCall { target: [0xBB; 20], value: uint256_from_u64(100), data: vec![0x02] },
 ];
 let batch = encode_execute_batch(&calls);
 
@@ -144,7 +148,7 @@ let op = PackedUserOperation {
     paymaster_and_data: vec![],
     signature: vec![],
 };
-let hash = op.hash(&entry_point, 1);
+let hash = op.hash(&entry_point, uint256_from_u64(1));
 
 // ERC-1271 contract signature validation
 use chains_sdk::ethereum::smart_wallet::{encode_is_valid_signature, is_valid_signature_magic};
