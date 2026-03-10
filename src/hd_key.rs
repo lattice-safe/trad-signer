@@ -1429,4 +1429,40 @@ mod tests {
         assert_eq!(parsed.outputs[0].value, 50_000);
         assert_eq!(parsed.locktime, 0);
     }
+
+    // ─── Extended Public Key Normal Derivation Consistency ──────
+    // BIP-32: Public parent key → public child key must match
+    // private derivation followed by public key extraction.
+
+    #[test]
+    fn test_xpub_normal_derivation_matches_private_path() {
+        let seed = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+        let master = ExtendedPrivateKey::from_seed(&seed).unwrap();
+
+        // Derive m/0' (hardened) then derive normal children 0..5
+        let parent_priv = master.derive_child(0, true).unwrap();
+        let parent_pub = parent_priv.to_extended_public_key().unwrap();
+
+        for idx in 0..5 {
+            // Private path: derive child then extract pubkey
+            let child_priv = parent_priv.derive_child(idx, false).unwrap();
+            let expected_pubkey = child_priv.public_key_bytes().unwrap();
+
+            // Public-only path: derive directly from xpub
+            let child_pub = parent_pub.derive_child_normal(idx).unwrap();
+            let actual_pubkey = child_pub.public_key_bytes();
+
+            assert_eq!(
+                expected_pubkey, actual_pubkey.as_slice(),
+                "Normal child {idx}: public-only derivation must match private derivation"
+            );
+
+            // Also verify chain codes match
+            assert_eq!(
+                child_priv.chain_code(),
+                child_pub.chain_code(),
+                "Normal child {idx}: chain codes must match"
+            );
+        }
+    }
 }

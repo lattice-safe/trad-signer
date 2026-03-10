@@ -151,9 +151,10 @@ impl NeoSigner {
             ));
         }
 
-        // Verify checksum
+        // Verify checksum (constant-time comparison)
         let checksum = crypto::double_sha256(&decoded[..34]);
-        if decoded[34..38] != checksum[..4] {
+        use subtle::ConstantTimeEq;
+        if decoded[34..38].ct_eq(&checksum[..4]).unwrap_u8() != 1 {
             return Err(SignerError::InvalidPrivateKey("WIF: bad checksum".into()));
         }
 

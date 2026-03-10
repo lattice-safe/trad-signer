@@ -305,9 +305,10 @@ fn validate_base58check(address: &str, valid_versions: &[u8]) -> bool {
     if !valid_versions.contains(&decoded[0]) {
         return false;
     }
-    // Verify checksum
+    // Verify checksum (constant-time comparison)
     let checksum = double_sha256(&decoded[..21]);
-    decoded[21..25] == checksum[..4]
+    use subtle::ConstantTimeEq;
+    decoded[21..25].ct_eq(&checksum[..4]).unwrap_u8() == 1
 }
 
 impl traits::Signer for BitcoinSigner {

@@ -188,9 +188,10 @@ pub fn decode_x_address(x_address: &str) -> Result<([u8; 20], Option<u32>, bool)
         )));
     }
 
-    // Verify checksum
+    // Verify checksum (constant-time comparison)
     let checksum = crypto::double_sha256(&decoded[..31]);
-    if decoded[31..35] != checksum[..4] {
+    use subtle::ConstantTimeEq;
+    if decoded[31..35].ct_eq(&checksum[..4]).unwrap_u8() != 1 {
         return Err(SignerError::ParseError("X-address: bad checksum".into()));
     }
 

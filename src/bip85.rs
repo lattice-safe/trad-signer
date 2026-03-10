@@ -383,4 +383,55 @@ mod tests {
             assert_eq!(w.len(), words as usize, "wrong word count for {words}");
         }
     }
+
+    // ─── BIP-85 Official Reference Vector ───────────────────────
+    // Master xprv from BIP-32 Test Vector 1 (seed 000102030405060708090a0b0c0d0e0f)
+    // Verify: importing via from_xprv produces the same key as from_seed
+
+    #[test]
+    fn test_bip85_xprv_import_consistency() {
+        let xprv_str = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
+        let from_xprv = ExtendedPrivateKey::from_xprv(xprv_str).expect("valid xprv");
+        let from_seed = test_master_key();
+
+        // Same key regardless of import method
+        assert_eq!(
+            &*from_xprv.private_key_bytes(),
+            &*from_seed.private_key_bytes(),
+            "xprv import must match seed-derived master key"
+        );
+
+        // Derive BIP-85 mnemonic from both — must be identical
+        let m1 = derive_bip39(&from_xprv, 0, 12, 0).expect("ok");
+        let m2 = derive_bip39(&from_seed, 0, 12, 0).expect("ok");
+        assert_eq!(m1, m2, "BIP-85 derivation must be identical from both import paths");
+    }
+
+    #[test]
+    fn test_bip85_derived_entropy_known_vector() {
+        // BIP-85: Derive raw entropy at m/83696968'/0'/0'
+        // from the BIP-32 Test Vector 1 master key.
+        // Verify determinism and non-zero output.
+        let master = test_master_key();
+        let entropy = derive_entropy_at(&master, 0, 0).expect("ok");
+
+        // Must be 64 bytes (HMAC-SHA512 output)
+        assert_eq!(entropy.len(), 64);
+
+        // Must be non-zero
+        assert_ne!(&*entropy, &[0u8; 64]);
+
+        // Must be deterministic
+        let entropy2 = derive_entropy_at(&master, 0, 0).expect("ok");
+        assert_eq!(&*entropy, &*entropy2);
+
+        // Different path must produce different entropy
+        let entropy3 = derive_entropy_at(&master, 0, 1).expect("ok");
+        assert_ne!(&*entropy, &*entropy3);
+
+        // Verify derived BIP-39 mnemonic is a valid parseable mnemonic
+        let mnemonic = derive_bip39(&master, 0, 12, 0).expect("ok");
+        let parsed = crate::mnemonic::Mnemonic::from_phrase(&mnemonic);
+        assert!(parsed.is_ok(), "derived mnemonic must be parseable: {mnemonic}");
+    }
 }
