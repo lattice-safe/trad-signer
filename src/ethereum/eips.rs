@@ -173,7 +173,7 @@ impl UserOperation {
     ///
     /// `keccak256(abi.encode(pack(userOp), entryPoint, chainId))`
     #[must_use]
-    pub fn hash(&self, entry_point: &[u8; 20], chain_id: u64) -> [u8; 32] {
+    pub fn hash(&self, entry_point: &[u8; 20], chain_id: [u8; 32]) -> [u8; 32] {
         let packed_hash = keccak256(&self.pack());
         let mut data = Vec::with_capacity(3 * 32);
         data.extend_from_slice(&packed_hash);
@@ -182,9 +182,7 @@ impl UserOperation {
         ep_buf[12..].copy_from_slice(entry_point);
         data.extend_from_slice(&ep_buf);
 
-        let mut chain_buf = [0u8; 32];
-        chain_buf[24..].copy_from_slice(&chain_id.to_be_bytes());
-        data.extend_from_slice(&chain_buf);
+        data.extend_from_slice(&chain_id);
 
         keccak256(&data)
     }
@@ -194,20 +192,19 @@ impl UserOperation {
         &self,
         signer: &super::EthereumSigner,
         entry_point: &[u8; 20],
-        chain_id: u64,
+        chain_id: [u8; 32],
     ) -> Result<super::EthereumSignature, SignerError> {
         let hash = self.hash(entry_point, chain_id);
-        // EIP-191 personal_sign style hashing for the final signature
-        let eth_hash = eth_signed_message_hash(&hash);
-        signer.sign_digest(&eth_hash)
+        signer.sign_digest(&hash)
     }
 }
 
-fn eth_signed_message_hash(hash: &[u8; 32]) -> [u8; 32] {
-    let mut buf = Vec::with_capacity(28 + 32);
-    buf.extend_from_slice(b"\x19Ethereum Signed Message:\n32");
-    buf.extend_from_slice(hash);
-    keccak256(&buf)
+/// Convert a `u64` into canonical `uint256` encoding.
+#[must_use]
+pub fn uint256_from_u64(value: u64) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[24..].copy_from_slice(&value.to_be_bytes());
+    out
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -830,8 +827,8 @@ mod tests {
             paymaster_and_data: vec![],
         };
         let entry_point = [0xBB; 20];
-        let h1 = op.hash(&entry_point, 1);
-        let h2 = op.hash(&entry_point, 1);
+        let h1 = op.hash(&entry_point, uint256_from_u64(1));
+        let h2 = op.hash(&entry_point, uint256_from_u64(1));
         assert_eq!(h1, h2);
     }
 
@@ -850,7 +847,10 @@ mod tests {
             paymaster_and_data: vec![],
         };
         let ep = [0xBB; 20];
-        assert_ne!(op.hash(&ep, 1), op.hash(&ep, 5));
+        assert_ne!(
+            op.hash(&ep, uint256_from_u64(1)),
+            op.hash(&ep, uint256_from_u64(5))
+        );
     }
 
     #[test]
@@ -868,7 +868,7 @@ mod tests {
             max_priority_fee_per_gas: [0; 32],
             paymaster_and_data: vec![],
         };
-        let sig = op.sign(&signer, &[0x55; 20], 1).unwrap();
+        let sig = op.sign(&signer, &[0x55; 20], uint256_from_u64(1)).unwrap();
         assert_eq!(sig.r.len(), 32);
     }
 

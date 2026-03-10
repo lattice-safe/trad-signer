@@ -12,21 +12,25 @@
 //! use chains_sdk::ethereum::smart_wallet::{
 //!     PackedUserOperation, encode_execute, encode_execute_batch, ExecuteCall,
 //!     encode_is_valid_signature, is_valid_signature_magic,
+//!     uint256_from_u64,
 //! };
 //!
 //! // Encode a smart wallet execute call
-//! let calldata = encode_execute([0xBB; 20], 0, &[]);
+//! let calldata = encode_execute([0xBB; 20], uint256_from_u64(0), &[]);
 //!
 //! // Batch execution
 //! let calls = vec![
-//!     ExecuteCall { target: [0xAA; 20], value: 0, data: vec![0x01] },
-//!     ExecuteCall { target: [0xBB; 20], value: 100, data: vec![0x02] },
+//!     ExecuteCall { target: [0xAA; 20], value: uint256_from_u64(0), data: vec![0x01] },
+//!     ExecuteCall { target: [0xBB; 20], value: uint256_from_u64(100), data: vec![0x02] },
 //! ];
 //! let batch = encode_execute_batch(&calls);
 //! ```
 
 use crate::error::SignerError;
 use crate::ethereum::abi::{self, AbiValue};
+
+/// A raw uint256 value encoded as 32-byte big-endian.
+pub type Uint256 = [u8; 32];
 
 // ─── EIP-4337 v0.7 Packed User Operation ───────────────────────────
 
@@ -82,12 +86,12 @@ impl PackedUserOperation {
     ///
     /// `keccak256(abi.encode(pack(userOp), entryPoint, chainId))`
     #[must_use]
-    pub fn hash(&self, entry_point: &[u8; 20], chain_id: u64) -> [u8; 32] {
+    pub fn hash(&self, entry_point: &[u8; 20], chain_id: Uint256) -> [u8; 32] {
         let packed_hash = keccak256(&self.pack());
         let mut buf = Vec::with_capacity(3 * 32);
         buf.extend_from_slice(&packed_hash);
         buf.extend_from_slice(&pad_address(entry_point));
-        buf.extend_from_slice(&pad_u64(chain_id));
+        buf.extend_from_slice(&chain_id);
         keccak256(&buf)
     }
 
@@ -96,7 +100,7 @@ impl PackedUserOperation {
         &self,
         signer: &super::EthereumSigner,
         entry_point: &[u8; 20],
-        chain_id: u64,
+        chain_id: Uint256,
     ) -> Result<super::EthereumSignature, SignerError> {
         let hash = self.hash(entry_point, chain_id);
         signer.sign_digest(&hash)
@@ -238,11 +242,11 @@ pub fn decode_paymaster_data(
 ///
 /// Standard smart wallet execution function (e.g. SimpleAccount, Kernel, etc.).
 #[must_use]
-pub fn encode_execute(dest: [u8; 20], value: u128, func: &[u8]) -> Vec<u8> {
+pub fn encode_execute(dest: [u8; 20], value: Uint256, func: &[u8]) -> Vec<u8> {
     let f = abi::Function::new("execute(address,uint256,bytes)");
     f.encode(&[
         AbiValue::Address(dest),
-        AbiValue::from_u128(value),
+        AbiValue::Uint256(value),
         AbiValue::Bytes(func.to_vec()),
     ])
 }
@@ -253,7 +257,7 @@ pub struct ExecuteCall {
     /// Target contract address.
     pub target: [u8; 20],
     /// ETH value in wei.
-    pub value: u128,
+    pub value: Uint256,
     /// Calldata to execute.
     pub data: Vec<u8>,
 }
@@ -265,7 +269,7 @@ pub struct ExecuteCall {
 pub fn encode_execute_batch(calls: &[ExecuteCall]) -> Vec<u8> {
     let f = abi::Function::new("executeBatch(address[],uint256[],bytes[])");
     let dests: Vec<AbiValue> = calls.iter().map(|c| AbiValue::Address(c.target)).collect();
-    let values: Vec<AbiValue> = calls.iter().map(|c| AbiValue::from_u128(c.value)).collect();
+    let values: Vec<AbiValue> = calls.iter().map(|c| AbiValue::Uint256(c.value)).collect();
     let funcs: Vec<AbiValue> = calls
         .iter()
         .map(|c| AbiValue::Bytes(c.data.clone()))
@@ -326,27 +330,27 @@ pub fn is_valid_signature_magic_raw(return_data: &[u8]) -> bool {
 ///
 /// Standard account factory for deploying new smart accounts.
 #[must_use]
-pub fn encode_create_account(owner: [u8; 20], salt: u64) -> Vec<u8> {
+pub fn encode_create_account(owner: [u8; 20], salt: Uint256) -> Vec<u8> {
     let f = abi::Function::new("createAccount(address,uint256)");
-    f.encode(&[AbiValue::Address(owner), AbiValue::from_u64(salt)])
+    f.encode(&[AbiValue::Address(owner), AbiValue::Uint256(salt)])
 }
 
 /// ABI-encode `getAddress(address owner, uint256 salt)`.
 ///
 /// Query the counterfactual address of a smart account.
 #[must_use]
-pub fn encode_get_address(owner: [u8; 20], salt: u64) -> Vec<u8> {
+pub fn encode_get_address(owner: [u8; 20], salt: Uint256) -> Vec<u8> {
     let f = abi::Function::new("getAddress(address,uint256)");
-    f.encode(&[AbiValue::Address(owner), AbiValue::from_u64(salt)])
+    f.encode(&[AbiValue::Address(owner), AbiValue::Uint256(salt)])
 }
 
 // ─── Nonce Management ──────────────────────────────────────────────
 
 /// ABI-encode `getNonce(address sender, uint192 key)` for EntryPoint nonce query.
 #[must_use]
-pub fn encode_get_nonce(sender: [u8; 20], key: u64) -> Vec<u8> {
+pub fn encode_get_nonce(sender: [u8; 20], key: Uint256) -> Vec<u8> {
     let f = abi::Function::new("getNonce(address,uint192)");
-    f.encode(&[AbiValue::Address(sender), AbiValue::from_u64(key)])
+    f.encode(&[AbiValue::Address(sender), AbiValue::Uint256(key)])
 }
 
 // ─── Internal Helpers ──────────────────────────────────────────────
@@ -361,10 +365,12 @@ fn pad_address(addr: &[u8; 20]) -> [u8; 32] {
     buf
 }
 
-fn pad_u64(val: u64) -> [u8; 32] {
-    let mut buf = [0u8; 32];
-    buf[24..32].copy_from_slice(&val.to_be_bytes());
-    buf
+/// Convert a u64 value into canonical uint256 encoding.
+#[must_use]
+pub fn uint256_from_u64(value: u64) -> Uint256 {
+    let mut out = [0u8; 32];
+    out[24..].copy_from_slice(&value.to_be_bytes());
+    out
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────
@@ -412,20 +418,29 @@ mod tests {
     fn test_hash_deterministic() {
         let op = sample_op();
         let ep = [0xFF; 20];
-        assert_eq!(op.hash(&ep, 1), op.hash(&ep, 1));
+        assert_eq!(
+            op.hash(&ep, uint256_from_u64(1)),
+            op.hash(&ep, uint256_from_u64(1))
+        );
     }
 
     #[test]
     fn test_hash_changes_with_chain_id() {
         let op = sample_op();
         let ep = [0xFF; 20];
-        assert_ne!(op.hash(&ep, 1), op.hash(&ep, 137));
+        assert_ne!(
+            op.hash(&ep, uint256_from_u64(1)),
+            op.hash(&ep, uint256_from_u64(137))
+        );
     }
 
     #[test]
     fn test_hash_changes_with_entry_point() {
         let op = sample_op();
-        assert_ne!(op.hash(&[0xAA; 20], 1), op.hash(&[0xBB; 20], 1));
+        assert_ne!(
+            op.hash(&[0xAA; 20], uint256_from_u64(1)),
+            op.hash(&[0xBB; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -444,7 +459,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.call_data = vec![0x03, 0x04];
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -452,7 +470,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.sender = [0xBB; 20];
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -460,7 +481,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.nonce[31] = 1;
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     // ─── Sign ─────────────────────────────────────────────────
@@ -469,7 +493,7 @@ mod tests {
     fn test_sign_produces_valid_signature() {
         let signer = super::super::EthereumSigner::generate().unwrap();
         let op = sample_op();
-        let sig = op.sign(&signer, &[0xFF; 20], 1).unwrap();
+        let sig = op.sign(&signer, &[0xFF; 20], uint256_from_u64(1)).unwrap();
         assert!(sig.v == 27 || sig.v == 28);
         assert_ne!(sig.r, [0u8; 32]);
     }
@@ -478,8 +502,8 @@ mod tests {
     fn test_sign_recovers_correct_address() {
         let signer = super::super::EthereumSigner::generate().unwrap();
         let op = sample_op();
-        let sig = op.sign(&signer, &[0xFF; 20], 1).unwrap();
-        let hash = op.hash(&[0xFF; 20], 1);
+        let sig = op.sign(&signer, &[0xFF; 20], uint256_from_u64(1)).unwrap();
+        let hash = op.hash(&[0xFF; 20], uint256_from_u64(1));
         let recovered = super::super::ecrecover_digest(&hash, &sig).unwrap();
         assert_eq!(recovered, signer.address());
     }
@@ -580,14 +604,14 @@ mod tests {
 
     #[test]
     fn test_encode_execute_selector() {
-        let calldata = encode_execute([0xBB; 20], 0, &[]);
+        let calldata = encode_execute([0xBB; 20], uint256_from_u64(0), &[]);
         let expected = abi::function_selector("execute(address,uint256,bytes)");
         assert_eq!(&calldata[..4], &expected);
     }
 
     #[test]
     fn test_encode_execute_with_value() {
-        let calldata = encode_execute([0xBB; 20], 1_000_000, &[0xDE, 0xAD]);
+        let calldata = encode_execute([0xBB; 20], uint256_from_u64(1_000_000), &[0xDE, 0xAD]);
         assert!(calldata.len() > 4 + 3 * 32);
     }
 
@@ -595,7 +619,7 @@ mod tests {
     fn test_encode_execute_batch_selector() {
         let calls = vec![ExecuteCall {
             target: [0xAA; 20],
-            value: 0,
+            value: uint256_from_u64(0),
             data: vec![],
         }];
         let calldata = encode_execute_batch(&calls);
@@ -608,12 +632,12 @@ mod tests {
         let calls = vec![
             ExecuteCall {
                 target: [0xAA; 20],
-                value: 100,
+                value: uint256_from_u64(100),
                 data: vec![0x01],
             },
             ExecuteCall {
                 target: [0xBB; 20],
-                value: 200,
+                value: uint256_from_u64(200),
                 data: vec![0x02],
             },
         ];
@@ -683,14 +707,14 @@ mod tests {
 
     #[test]
     fn test_encode_create_account_selector() {
-        let calldata = encode_create_account([0xAA; 20], 0);
+        let calldata = encode_create_account([0xAA; 20], uint256_from_u64(0));
         let expected = abi::function_selector("createAccount(address,uint256)");
         assert_eq!(&calldata[..4], &expected);
     }
 
     #[test]
     fn test_encode_get_address_selector() {
-        let calldata = encode_get_address([0xAA; 20], 0);
+        let calldata = encode_get_address([0xAA; 20], uint256_from_u64(0));
         let expected = abi::function_selector("getAddress(address,uint256)");
         assert_eq!(&calldata[..4], &expected);
     }
@@ -699,7 +723,7 @@ mod tests {
 
     #[test]
     fn test_encode_get_nonce_selector() {
-        let calldata = encode_get_nonce([0xAA; 20], 0);
+        let calldata = encode_get_nonce([0xAA; 20], uint256_from_u64(0));
         let expected = abi::function_selector("getNonce(address,uint192)");
         assert_eq!(&calldata[..4], &expected);
     }
@@ -715,8 +739,8 @@ mod tests {
     }
 
     #[test]
-    fn test_pad_u64() {
-        let padded = pad_u64(256);
+    fn test_uint256_from_u64() {
+        let padded = uint256_from_u64(256);
         assert_eq!(&padded[..24], &[0u8; 24]);
         assert_eq!(&padded[24..], &256u64.to_be_bytes());
     }
@@ -728,7 +752,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.init_code = vec![0xFF; 20];
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -736,7 +763,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.paymaster_and_data = vec![0xAA; 52];
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -744,7 +774,10 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.account_gas_limits = PackedUserOperation::pack_account_gas_limits(999, 888);
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 
     #[test]
@@ -752,6 +785,9 @@ mod tests {
         let op1 = sample_op();
         let mut op2 = sample_op();
         op2.gas_fees = PackedUserOperation::pack_gas_fees(999, 888);
-        assert_ne!(op1.hash(&[0xFF; 20], 1), op2.hash(&[0xFF; 20], 1));
+        assert_ne!(
+            op1.hash(&[0xFF; 20], uint256_from_u64(1)),
+            op2.hash(&[0xFF; 20], uint256_from_u64(1))
+        );
     }
 }

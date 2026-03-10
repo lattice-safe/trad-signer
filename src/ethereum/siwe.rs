@@ -126,70 +126,147 @@ impl SiweMessage {
             .strip_suffix(" wants you to sign in with your Ethereum account:")
             .ok_or_else(|| SignerError::ParseError("invalid SIWE domain line".into()))?
             .to_string();
+        if !validate_domain(&domain) {
+            return Err(SignerError::ParseError("invalid SIWE domain".into()));
+        }
 
         // Line 1: address
         let address = lines[1].to_string();
-
-        // Parse optional statement (between address and URI block)
-        let mut idx = 2;
-        let mut statement = None;
-
-        // Skip empty line after address
-        if idx < lines.len() && lines[idx].is_empty() {
-            idx += 1;
+        if !super::validate_address(&address) {
+            return Err(SignerError::ParseError("invalid SIWE address".into()));
+        }
+        let address_bytes = parse_eth_address_bytes(&address)
+            .ok_or_else(|| SignerError::ParseError("invalid SIWE address".into()))?;
+        if super::eip55_checksum(&address_bytes) != address {
+            return Err(SignerError::ParseError(
+                "SIWE address must be EIP-55 checksummed".into(),
+            ));
         }
 
-        // Check if next non-empty line is a statement (not a field)
-        if idx < lines.len() && !lines[idx].is_empty() && !lines[idx].starts_with("URI:") {
+        // Parse optional statement (between address and URI block).
+        let mut idx = 2;
+        if idx >= lines.len() || !lines[idx].is_empty() {
+            return Err(SignerError::ParseError(
+                "missing blank line after SIWE address".into(),
+            ));
+        }
+        idx += 1;
+
+        let mut statement = None;
+        if idx < lines.len() && !lines[idx].starts_with("URI: ") {
+            if lines[idx].is_empty() {
+                return Err(SignerError::ParseError(
+                    "invalid empty SIWE statement".into(),
+                ));
+            }
             statement = Some(lines[idx].to_string());
             idx += 1;
-        }
-
-        // Skip empty line after statement
-        if idx < lines.len() && lines[idx].is_empty() {
-            idx += 1;
-        }
-
-        // Parse fields
-        let mut uri = String::new();
-        let mut version = String::new();
-        let mut chain_id = 0u64;
-        let mut nonce = String::new();
-        let mut issued_at = String::new();
-        let mut expiration_time = None;
-        let mut not_before = None;
-        let mut request_id = None;
-        let mut resources = Vec::new();
-        let mut in_resources = false;
-
-        while idx < lines.len() {
-            let line = lines[idx];
-            if in_resources {
-                if let Some(r) = line.strip_prefix("- ") {
-                    resources.push(r.to_string());
-                }
-            } else if let Some(v) = line.strip_prefix("URI: ") {
-                uri = v.to_string();
-            } else if let Some(v) = line.strip_prefix("Version: ") {
-                version = v.to_string();
-            } else if let Some(v) = line.strip_prefix("Chain ID: ") {
-                chain_id = v
-                    .parse::<u64>()
-                    .map_err(|_| SignerError::ParseError("invalid chain ID".into()))?;
-            } else if let Some(v) = line.strip_prefix("Nonce: ") {
-                nonce = v.to_string();
-            } else if let Some(v) = line.strip_prefix("Issued At: ") {
-                issued_at = v.to_string();
-            } else if let Some(v) = line.strip_prefix("Expiration Time: ") {
-                expiration_time = Some(v.to_string());
-            } else if let Some(v) = line.strip_prefix("Not Before: ") {
-                not_before = Some(v.to_string());
-            } else if let Some(v) = line.strip_prefix("Request ID: ") {
-                request_id = Some(v.to_string());
-            } else if line == "Resources:" {
-                in_resources = true;
+            if idx >= lines.len() || !lines[idx].is_empty() {
+                return Err(SignerError::ParseError(
+                    "missing blank line after SIWE statement".into(),
+                ));
             }
             idx += 1;
+        }
+
+        let uri = parse_prefixed_line(lines.get(idx), "URI: ", "URI")?;
+        if !validate_uri(&uri) {
+            return Err(SignerError::ParseError("invalid SIWE URI".into()));
+        }
+        idx += 1;
+
+        let version = parse_prefixed_line(lines.get(idx), "Version: ", "Version")?;
+        if version != "1" {
+            return Err(SignerError::ParseError(
+                "unsupported SIWE version (must be 1)".into(),
+            ));
+        }
+        idx += 1;
+
+        let chain_id = parse_prefixed_line(lines.get(idx), "Chain ID: ", "Chain ID")?
+            .parse::<u64>()
+            .map_err(|_| SignerError::ParseError("invalid SIWE chain ID".into()))?;
+        if chain_id == 0 {
+            return Err(SignerError::ParseError(
+                "invalid SIWE chain ID (must be non-zero)".into(),
+            ));
+        }
+        idx += 1;
+
+        let nonce = parse_prefixed_line(lines.get(idx), "Nonce: ", "Nonce")?;
+        if !validate_nonce(&nonce) {
+            return Err(SignerError::ParseError("invalid SIWE nonce".into()));
+        }
+        idx += 1;
+
+        let issued_at = parse_prefixed_line(lines.get(idx), "Issued At: ", "Issued At")?;
+        if !validate_rfc3339_datetime(&issued_at) {
+            return Err(SignerError::ParseError("invalid SIWE issued-at".into()));
+        }
+        idx += 1;
+
+        let mut expiration_time: Option<String> = None;
+        if let Some(line) = lines.get(idx) {
+            if let Some(v) = line.strip_prefix("Expiration Time: ") {
+                if !validate_rfc3339_datetime(v) {
+                    return Err(SignerError::ParseError(
+                        "invalid SIWE expiration time".into(),
+                    ));
+                }
+                expiration_time = Some(v.to_string());
+                idx += 1;
+            }
+        }
+
+        let mut not_before: Option<String> = None;
+        if let Some(line) = lines.get(idx) {
+            if let Some(v) = line.strip_prefix("Not Before: ") {
+                if !validate_rfc3339_datetime(v) {
+                    return Err(SignerError::ParseError("invalid SIWE not-before".into()));
+                }
+                not_before = Some(v.to_string());
+                idx += 1;
+            }
+        }
+
+        let mut request_id: Option<String> = None;
+        if let Some(line) = lines.get(idx) {
+            if let Some(v) = line.strip_prefix("Request ID: ") {
+                if !validate_request_id(v) {
+                    return Err(SignerError::ParseError("invalid SIWE request ID".into()));
+                }
+                request_id = Some(v.to_string());
+                idx += 1;
+            }
+        }
+
+        let mut resources = Vec::new();
+        if let Some(line) = lines.get(idx) {
+            if *line == "Resources:" {
+                idx += 1;
+                while idx < lines.len() {
+                    let resource_line = lines[idx];
+                    let resource = resource_line.strip_prefix("- ").ok_or_else(|| {
+                        SignerError::ParseError("invalid SIWE resources list entry".into())
+                    })?;
+                    if !validate_uri(resource) {
+                        return Err(SignerError::ParseError("invalid SIWE resource URI".into()));
+                    }
+                    resources.push(resource.to_string());
+                    idx += 1;
+                }
+                if resources.is_empty() {
+                    return Err(SignerError::ParseError(
+                        "SIWE resources section must contain at least one URI".into(),
+                    ));
+                }
+            }
+        }
+
+        if idx != lines.len() {
+            return Err(SignerError::ParseError(
+                "unexpected trailing SIWE content".into(),
+            ));
         }
 
         Ok(Self {
@@ -228,6 +305,162 @@ impl SiweMessage {
         let recovered = super::ecrecover_digest(&hash, signature)?;
         let expected = super::eip55_checksum(&recovered);
         Ok(expected == self.address)
+    }
+}
+
+fn parse_prefixed_line(
+    line: Option<&&str>,
+    prefix: &str,
+    field_name: &str,
+) -> Result<String, SignerError> {
+    let line = line.ok_or_else(|| SignerError::ParseError(format!("missing SIWE {field_name}")))?;
+    line.strip_prefix(prefix)
+        .map(ToString::to_string)
+        .ok_or_else(|| SignerError::ParseError(format!("missing SIWE {field_name}")))
+}
+
+fn validate_domain(domain: &str) -> bool {
+    !domain.is_empty()
+        && !domain.contains("://")
+        && domain.chars().any(|c| c.is_ascii_alphanumeric())
+        && !domain.chars().any(|c| c.is_ascii_whitespace())
+}
+
+fn validate_nonce(nonce: &str) -> bool {
+    nonce.len() >= 8 && nonce.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn validate_uri(uri: &str) -> bool {
+    if uri.is_empty() || uri.chars().any(|c| c.is_ascii_whitespace()) {
+        return false;
+    }
+    let mut parts = uri.splitn(2, ':');
+    let Some(scheme) = parts.next() else {
+        return false;
+    };
+    let Some(_) = parts.next() else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+}
+
+fn validate_request_id(request_id: &str) -> bool {
+    request_id.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
+fn validate_rfc3339_datetime(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20 {
+        return false;
+    }
+    if !(bytes[0].is_ascii_digit()
+        && bytes[1].is_ascii_digit()
+        && bytes[2].is_ascii_digit()
+        && bytes[3].is_ascii_digit()
+        && bytes[4] == b'-'
+        && bytes[5].is_ascii_digit()
+        && bytes[6].is_ascii_digit()
+        && bytes[7] == b'-'
+        && bytes[8].is_ascii_digit()
+        && bytes[9].is_ascii_digit()
+        && bytes[10] == b'T'
+        && bytes[11].is_ascii_digit()
+        && bytes[12].is_ascii_digit()
+        && bytes[13] == b':'
+        && bytes[14].is_ascii_digit()
+        && bytes[15].is_ascii_digit()
+        && bytes[16] == b':'
+        && bytes[17].is_ascii_digit()
+        && bytes[18].is_ascii_digit())
+    {
+        return false;
+    }
+
+    let month = parse_two_digits(&bytes[5..7]);
+    let day = parse_two_digits(&bytes[8..10]);
+    let hour = parse_two_digits(&bytes[11..13]);
+    let minute = parse_two_digits(&bytes[14..16]);
+    let second = parse_two_digits(&bytes[17..19]);
+    let Some(month) = month else { return false };
+    let Some(day) = day else { return false };
+    let Some(hour) = hour else { return false };
+    let Some(minute) = minute else { return false };
+    let Some(second) = second else { return false };
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return false;
+    }
+
+    let mut idx = 19;
+    if bytes[idx] == b'.' {
+        idx += 1;
+        let frac_start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx == frac_start {
+            return false;
+        }
+    }
+
+    if idx >= bytes.len() {
+        return false;
+    }
+
+    match bytes[idx] {
+        b'Z' => idx + 1 == bytes.len(),
+        b'+' | b'-' => {
+            if idx + 6 != bytes.len() {
+                return false;
+            }
+            let tz_hour = parse_two_digits(&bytes[idx + 1..idx + 3]);
+            let tz_minute = parse_two_digits(&bytes[idx + 4..idx + 6]);
+            bytes[idx + 3] == b':'
+                && tz_hour.is_some_and(|h| h <= 23)
+                && tz_minute.is_some_and(|m| m <= 59)
+        }
+        _ => false,
+    }
+}
+
+fn parse_two_digits(bytes: &[u8]) -> Option<u8> {
+    if bytes.len() != 2 || !bytes[0].is_ascii_digit() || !bytes[1].is_ascii_digit() {
+        return None;
+    }
+    Some((bytes[0] - b'0') * 10 + (bytes[1] - b'0'))
+}
+
+fn parse_eth_address_bytes(address: &str) -> Option<[u8; 20]> {
+    if address.len() != 42 || !address.starts_with("0x") {
+        return None;
+    }
+    let mut out = [0u8; 20];
+    let hex = address.as_bytes();
+    for i in 0..20 {
+        let hi = decode_hex_nibble(hex[2 + i * 2])?;
+        let lo = decode_hex_nibble(hex[2 + i * 2 + 1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn decode_hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -319,6 +552,38 @@ mod tests {
         let parsed = SiweMessage::from_message(&text).unwrap();
         assert_eq!(parsed.statement, None);
         assert_eq!(parsed.domain, "example.com");
+    }
+
+    #[test]
+    fn test_siwe_reject_invalid_version() {
+        let mut msg = sample_message();
+        msg.version = "2".to_string();
+        let err = SiweMessage::from_message(&msg.to_message()).unwrap_err();
+        assert!(err.to_string().contains("unsupported SIWE version"));
+    }
+
+    #[test]
+    fn test_siwe_reject_short_nonce() {
+        let mut msg = sample_message();
+        msg.nonce = "abc".to_string();
+        let err = SiweMessage::from_message(&msg.to_message()).unwrap_err();
+        assert!(err.to_string().contains("invalid SIWE nonce"));
+    }
+
+    #[test]
+    fn test_siwe_reject_invalid_address() {
+        let mut msg = sample_message();
+        msg.address = "0x1234".to_string();
+        let err = SiweMessage::from_message(&msg.to_message()).unwrap_err();
+        assert!(err.to_string().contains("invalid SIWE address"));
+    }
+
+    #[test]
+    fn test_siwe_reject_non_checksummed_address() {
+        let mut msg = sample_message();
+        msg.address = "0xab5801a7d398351b8be11c439e05c5b3259aec9b".to_string();
+        let err = SiweMessage::from_message(&msg.to_message()).unwrap_err();
+        assert!(err.to_string().contains("EIP-55 checksummed"));
     }
 
     #[test]
