@@ -134,6 +134,14 @@ impl RlpItem {
                 "RLP integer too large for u64".into(),
             ));
         }
+        // Ethereum integer fields must use the shortest big-endian form.
+        // This rejects both 0x00 for zero (must be empty) and multi-byte
+        // values with a leading zero.
+        if !bytes.is_empty() && bytes[0] == 0 {
+            return Err(SignerError::ParseError(
+                "RLP integer has non-canonical leading zero".into(),
+            ));
+        }
         let mut buf = [0u8; 8];
         buf[8 - bytes.len()..].copy_from_slice(bytes);
         Ok(u64::from_be_bytes(buf))
@@ -466,6 +474,20 @@ mod tests {
             let decoded = decode(&encoded).unwrap();
             assert_eq!(decoded.as_u64().unwrap(), val, "failed for {val}");
         }
+    }
+
+    #[test]
+    fn test_rlp_integer_rejects_single_zero_byte_encoding() {
+        // Integer zero must be encoded as empty string (0x80), not 0x00.
+        let decoded = decode(&[0x00]).unwrap();
+        assert!(decoded.as_u64().is_err());
+    }
+
+    #[test]
+    fn test_rlp_integer_rejects_multibyte_leading_zero() {
+        // Integer one must be encoded as 0x01, not 0x82 00 01.
+        let decoded = decode(&[0x82, 0x00, 0x01]).unwrap();
+        assert!(decoded.as_u64().is_err());
     }
 
     #[test]

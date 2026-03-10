@@ -32,6 +32,7 @@
 use super::rlp;
 use super::EthereumSigner;
 use crate::error::SignerError;
+use core::cmp::Ordering;
 
 // ─── Signed Transaction ────────────────────────────────────────────
 
@@ -108,12 +109,28 @@ impl LegacyTransaction {
 
     /// Sign this transaction with the given signer.
     pub fn sign(&self, signer: &EthereumSigner) -> Result<SignedTransaction, SignerError> {
+        if self.chain_id == 0 {
+            return Err(SignerError::SigningFailed(
+                "legacy tx requires non-zero chain_id".into(),
+            ));
+        }
         let payload = self.signing_payload();
         let hash = keccak256(&payload);
         let sig = signer.sign_digest(&hash)?;
 
         // EIP-155: v = {0,1} + chain_id * 2 + 35
-        let v = (sig.v as u64 - 27) + self.chain_id * 2 + 35;
+        let recovery_id = sig
+            .v
+            .checked_sub(27)
+            .ok_or_else(|| SignerError::SigningFailed("invalid legacy recovery id".into()))?;
+        let v = recovery_id
+            .checked_add(
+                self.chain_id
+                    .checked_mul(2)
+                    .ok_or_else(|| SignerError::SigningFailed("chain_id overflow".into()))?,
+            )
+            .and_then(|vv| vv.checked_add(35))
+            .ok_or_else(|| SignerError::SigningFailed("EIP-155 v overflow".into()))?;
 
         let mut items = Vec::new();
         items.extend_from_slice(&rlp::encode_u64(self.nonce));
@@ -177,6 +194,11 @@ impl EIP2930Transaction {
 
     /// Sign this transaction.
     pub fn sign(&self, signer: &EthereumSigner) -> Result<SignedTransaction, SignerError> {
+        if self.chain_id == 0 {
+            return Err(SignerError::SigningFailed(
+                "type1 tx requires non-zero chain_id".into(),
+            ));
+        }
         let hash = self.signing_hash();
         let sig = signer.sign_digest(&hash)?;
         let y_parity = sig.v - 27; // 0 or 1
@@ -250,6 +272,16 @@ impl EIP1559Transaction {
 
     /// Sign this transaction.
     pub fn sign(&self, signer: &EthereumSigner) -> Result<SignedTransaction, SignerError> {
+        if self.chain_id == 0 {
+            return Err(SignerError::SigningFailed(
+                "type2 tx requires non-zero chain_id".into(),
+            ));
+        }
+        if self.max_priority_fee_per_gas > self.max_fee_per_gas {
+            return Err(SignerError::SigningFailed(
+                "max_priority_fee_per_gas cannot exceed max_fee_per_gas".into(),
+            ));
+        }
         let hash = self.signing_hash();
         let sig = signer.sign_digest(&hash)?;
         let y_parity = sig.v - 27; // 0 or 1
@@ -336,6 +368,28 @@ impl EIP4844Transaction {
 
     /// Sign this transaction.
     pub fn sign(&self, signer: &EthereumSigner) -> Result<SignedTransaction, SignerError> {
+        if self.chain_id == 0 {
+            return Err(SignerError::SigningFailed(
+                "type3 tx requires non-zero chain_id".into(),
+            ));
+        }
+        if self.max_priority_fee_per_gas > self.max_fee_per_gas {
+            return Err(SignerError::SigningFailed(
+                "max_priority_fee_per_gas cannot exceed max_fee_per_gas".into(),
+            ));
+        }
+        if self.blob_versioned_hashes.is_empty() {
+            return Err(SignerError::SigningFailed(
+                "type3 tx requires at least one blob versioned hash".into(),
+            ));
+        }
+        for (i, hash) in self.blob_versioned_hashes.iter().enumerate() {
+            if hash[0] != 0x01 {
+                return Err(SignerError::SigningFailed(format!(
+                    "blob_versioned_hashes[{i}] must start with version byte 0x01"
+                )));
+            }
+        }
         let hash = self.signing_hash();
         let sig = signer.sign_digest(&hash)?;
         let y_parity = sig.v - 27;
@@ -542,15 +596,19 @@ fn decode_legacy_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction,
     }
 
     let nonce = items[0].as_u64()?;
-    let gas_price = items[1].as_bytes()?.to_vec();
+    let gas_price_bytes = items[1].as_bytes()?;
+    validate_uint256_bytes(gas_price_bytes, "legacy tx gas_price")?;
+    let gas_price = gas_price_bytes.to_vec();
     let gas_limit = items[2].as_u64()?;
     let to_bytes = items[3].as_bytes()?;
     let to = decode_to_address(to_bytes)?;
-    let value = items[4].as_bytes()?.to_vec();
+    let value_bytes = items[4].as_bytes()?;
+    validate_uint256_bytes(value_bytes, "legacy tx value")?;
+    let value = value_bytes.to_vec();
     let data = items[5].as_bytes()?.to_vec();
     let v = items[6].as_u64()?;
-    let r = pad_to_32(items[7].as_bytes()?)?;
-    let s = pad_to_32(items[8].as_bytes()?)?;
+    let r = pad_to_32(items[7].as_bytes()?, "legacy tx r")?;
+    let s = pad_to_32(items[8].as_bytes()?, "legacy tx s")?;
 
     // EIP-155: chain_id = (v - 35) / 2
     let (chain_id, recovery_id) = if v >= 35 {
@@ -614,16 +672,20 @@ fn decode_type1_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
 
     let chain_id = items[0].as_u64()?;
     let nonce = items[1].as_u64()?;
-    let gas_price = items[2].as_bytes()?.to_vec();
+    let gas_price_bytes = items[2].as_bytes()?;
+    validate_uint256_bytes(gas_price_bytes, "type1 tx gas_price")?;
+    let gas_price = gas_price_bytes.to_vec();
     let gas_limit = items[3].as_u64()?;
     let to_bytes = items[4].as_bytes()?;
     let to = decode_to_address(to_bytes)?;
-    let value = items[5].as_bytes()?.to_vec();
+    let value_bytes = items[5].as_bytes()?;
+    validate_uint256_bytes(value_bytes, "type1 tx value")?;
+    let value = value_bytes.to_vec();
     let data = items[6].as_bytes()?.to_vec();
-    // items[7] = access_list (skip for decode)
+    validate_access_list(&items[7], "type1 tx")?;
     let y_parity = items[8].as_u64()?;
-    let r = pad_to_32(items[9].as_bytes()?)?;
-    let s = pad_to_32(items[10].as_bytes()?)?;
+    let r = pad_to_32(items[9].as_bytes()?, "type1 tx r")?;
+    let s = pad_to_32(items[10].as_bytes()?, "type1 tx s")?;
 
     // Reconstruct signing hash
     let mut sign_items = Vec::new();
@@ -676,17 +738,28 @@ fn decode_type2_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
 
     let chain_id = items[0].as_u64()?;
     let nonce = items[1].as_u64()?;
-    let max_priority_fee = items[2].as_bytes()?.to_vec();
-    let max_fee = items[3].as_bytes()?.to_vec();
+    let max_priority_fee_bytes = items[2].as_bytes()?;
+    validate_uint256_bytes(max_priority_fee_bytes, "type2 tx max_priority_fee_per_gas")?;
+    let max_priority_fee = max_priority_fee_bytes.to_vec();
+    let max_fee_bytes = items[3].as_bytes()?;
+    validate_uint256_bytes(max_fee_bytes, "type2 tx max_fee_per_gas")?;
+    let max_fee = max_fee_bytes.to_vec();
+    if cmp_uint256_be(&max_fee, &max_priority_fee) == Ordering::Less {
+        return Err(SignerError::ParseError(
+            "type2 tx: max_fee_per_gas cannot be lower than max_priority_fee_per_gas".into(),
+        ));
+    }
     let gas_limit = items[4].as_u64()?;
     let to_bytes = items[5].as_bytes()?;
     let to = decode_to_address(to_bytes)?;
-    let value = items[6].as_bytes()?.to_vec();
+    let value_bytes = items[6].as_bytes()?;
+    validate_uint256_bytes(value_bytes, "type2 tx value")?;
+    let value = value_bytes.to_vec();
     let data = items[7].as_bytes()?.to_vec();
-    // items[8] = access_list
+    validate_access_list(&items[8], "type2 tx")?;
     let y_parity = items[9].as_u64()?;
-    let r = pad_to_32(items[10].as_bytes()?)?;
-    let s = pad_to_32(items[11].as_bytes()?)?;
+    let r = pad_to_32(items[10].as_bytes()?, "type2 tx r")?;
+    let s = pad_to_32(items[11].as_bytes()?, "type2 tx s")?;
 
     // Reconstruct signing hash
     let mut sign_items = Vec::new();
@@ -739,17 +812,33 @@ fn decode_type3_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
 
     let chain_id = items[0].as_u64()?;
     let nonce = items[1].as_u64()?;
-    let max_priority_fee = items[2].as_bytes()?.to_vec();
-    let max_fee = items[3].as_bytes()?.to_vec();
+    let max_priority_fee_bytes = items[2].as_bytes()?;
+    validate_uint256_bytes(max_priority_fee_bytes, "type3 tx max_priority_fee_per_gas")?;
+    let max_priority_fee = max_priority_fee_bytes.to_vec();
+    let max_fee_bytes = items[3].as_bytes()?;
+    validate_uint256_bytes(max_fee_bytes, "type3 tx max_fee_per_gas")?;
+    let max_fee = max_fee_bytes.to_vec();
+    if cmp_uint256_be(&max_fee, &max_priority_fee) == Ordering::Less {
+        return Err(SignerError::ParseError(
+            "type3 tx: max_fee_per_gas cannot be lower than max_priority_fee_per_gas".into(),
+        ));
+    }
     let gas_limit = items[4].as_u64()?;
     let to_bytes = items[5].as_bytes()?;
-    let to = decode_to_address(to_bytes)?;
-    let value = items[6].as_bytes()?.to_vec();
+    let to = decode_to_address(to_bytes)?.ok_or_else(|| {
+        SignerError::ParseError("type3 tx: contract creation is not allowed".into())
+    })?;
+    let value_bytes = items[6].as_bytes()?;
+    validate_uint256_bytes(value_bytes, "type3 tx value")?;
+    let value = value_bytes.to_vec();
     let data = items[7].as_bytes()?.to_vec();
-    // items[8] = access_list, items[9] = max_fee_per_blob_gas, items[10] = blob_hashes
+    validate_access_list(&items[8], "type3 tx")?;
+    let max_fee_per_blob_gas_bytes = items[9].as_bytes()?;
+    validate_uint256_bytes(max_fee_per_blob_gas_bytes, "type3 tx max_fee_per_blob_gas")?;
+    validate_blob_hashes(&items[10])?;
     let y_parity = items[11].as_u64()?;
-    let r = pad_to_32(items[12].as_bytes()?)?;
-    let s = pad_to_32(items[13].as_bytes()?)?;
+    let r = pad_to_32(items[12].as_bytes()?, "type3 tx r")?;
+    let s = pad_to_32(items[13].as_bytes()?, "type3 tx s")?;
 
     // Reconstruct signing hash
     let mut sign_items = Vec::new();
@@ -758,7 +847,7 @@ fn decode_type3_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
     sign_items.extend_from_slice(&rlp::encode_bytes(&max_priority_fee));
     sign_items.extend_from_slice(&rlp::encode_bytes(&max_fee));
     sign_items.extend_from_slice(&rlp::encode_u64(gas_limit));
-    sign_items.extend_from_slice(&encode_address(&to));
+    sign_items.extend_from_slice(&rlp::encode_bytes(&to));
     sign_items.extend_from_slice(&rlp::encode_bytes(&value));
     sign_items.extend_from_slice(&rlp::encode_bytes(&data));
     sign_items.extend_from_slice(&re_encode_rlp_item(&items[8]));
@@ -779,7 +868,7 @@ fn decode_type3_tx(raw: &[u8], tx_hash: [u8; 32]) -> Result<DecodedTransaction, 
         tx_type: TxType::Type3Blob,
         chain_id,
         nonce,
-        to,
+        to: Some(to),
         value,
         data,
         gas_limit,
@@ -822,6 +911,124 @@ fn decode_to_address(bytes: &[u8]) -> Result<Option<[u8; 20]>, SignerError> {
     }
 }
 
+fn validate_uint256_bytes(bytes: &[u8], field: &str) -> Result<(), SignerError> {
+    if bytes.len() > 32 {
+        return Err(SignerError::ParseError(format!(
+            "{field} exceeds uint256 size ({} bytes)",
+            bytes.len()
+        )));
+    }
+    if bytes.len() > 1 && bytes[0] == 0 {
+        return Err(SignerError::ParseError(format!(
+            "{field} has non-canonical leading zero"
+        )));
+    }
+    if bytes.len() == 1 && bytes[0] == 0 {
+        return Err(SignerError::ParseError(format!(
+            "{field} has non-canonical zero encoding"
+        )));
+    }
+    Ok(())
+}
+
+fn trim_leading_zeros(bytes: &[u8]) -> &[u8] {
+    let mut idx = 0usize;
+    while idx < bytes.len() && bytes[idx] == 0 {
+        idx += 1;
+    }
+    &bytes[idx..]
+}
+
+fn cmp_uint256_be(lhs: &[u8], rhs: &[u8]) -> Ordering {
+    let lhs = trim_leading_zeros(lhs);
+    let rhs = trim_leading_zeros(rhs);
+    lhs.len().cmp(&rhs.len()).then_with(|| lhs.cmp(rhs))
+}
+
+fn validate_access_list(item: &rlp::RlpItem, tx_type: &str) -> Result<(), SignerError> {
+    let entries = match item {
+        rlp::RlpItem::List(entries) => entries,
+        _ => {
+            return Err(SignerError::ParseError(format!(
+                "{tx_type}: access_list must be an RLP list"
+            )));
+        }
+    };
+
+    for (entry_idx, entry) in entries.iter().enumerate() {
+        let parts = match entry {
+            rlp::RlpItem::List(parts) => parts,
+            _ => {
+                return Err(SignerError::ParseError(format!(
+                    "{tx_type}: access_list[{entry_idx}] must be a 2-item list"
+                )));
+            }
+        };
+        if parts.len() != 2 {
+            return Err(SignerError::ParseError(format!(
+                "{tx_type}: access_list[{entry_idx}] must contain [address, storageKeys]"
+            )));
+        }
+
+        let addr = parts[0].as_bytes()?;
+        if addr.len() != 20 {
+            return Err(SignerError::ParseError(format!(
+                "{tx_type}: access_list[{entry_idx}] address must be 20 bytes"
+            )));
+        }
+
+        let keys = match &parts[1] {
+            rlp::RlpItem::List(keys) => keys,
+            _ => {
+                return Err(SignerError::ParseError(format!(
+                    "{tx_type}: access_list[{entry_idx}] storageKeys must be a list"
+                )));
+            }
+        };
+        for (key_idx, key) in keys.iter().enumerate() {
+            let key_bytes = key.as_bytes()?;
+            if key_bytes.len() != 32 {
+                return Err(SignerError::ParseError(format!(
+                    "{tx_type}: access_list[{entry_idx}] storage key {key_idx} must be 32 bytes"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_blob_hashes(item: &rlp::RlpItem) -> Result<(), SignerError> {
+    let hashes = match item {
+        rlp::RlpItem::List(hashes) => hashes,
+        _ => {
+            return Err(SignerError::ParseError(
+                "type3 tx: blob_versioned_hashes must be an RLP list".into(),
+            ));
+        }
+    };
+
+    if hashes.is_empty() {
+        return Err(SignerError::ParseError(
+            "type3 tx: blob_versioned_hashes must not be empty".into(),
+        ));
+    }
+
+    for (idx, hash_item) in hashes.iter().enumerate() {
+        let hash = hash_item.as_bytes()?;
+        if hash.len() != 32 {
+            return Err(SignerError::ParseError(format!(
+                "type3 tx: blob_versioned_hashes[{idx}] must be 32 bytes"
+            )));
+        }
+        if hash[0] != 0x01 {
+            return Err(SignerError::ParseError(format!(
+                "type3 tx: blob_versioned_hashes[{idx}] must start with 0x01"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Recover the signer address from a message hash and ECDSA signature.
 fn recover_signer(
     hash: &[u8; 32],
@@ -859,10 +1066,25 @@ fn recover_signer(
     Ok(addr)
 }
 
-fn pad_to_32(data: &[u8]) -> Result<[u8; 32], SignerError> {
+fn pad_to_32(data: &[u8], field: &str) -> Result<[u8; 32], SignerError> {
+    if data.is_empty() {
+        return Err(SignerError::ParseError(format!(
+            "{field}: signature component cannot be empty"
+        )));
+    }
+    if data.len() == 1 && data[0] == 0 {
+        return Err(SignerError::ParseError(format!(
+            "{field}: signature component cannot be zero"
+        )));
+    }
+    if data.len() > 1 && data[0] == 0 {
+        return Err(SignerError::ParseError(format!(
+            "{field}: signature component has non-canonical leading zero"
+        )));
+    }
     if data.len() > 32 {
         return Err(SignerError::ParseError(format!(
-            "signature component too large: {} bytes (max 32)",
+            "{field}: signature component too large: {} bytes (max 32)",
             data.len()
         )));
     }
@@ -1229,12 +1451,15 @@ mod tests {
         items.extend_from_slice(&crate::ethereum::rlp::encode_u64(1)); // s
         let raw = crate::ethereum::rlp::encode_list(&items);
 
-        match decode_signed_tx(&raw) {
-            Err(SignerError::ParseError(msg)) => {
-                assert!(msg.contains("non-canonical EIP-155 v value"));
-            }
-            other => panic!("expected ParseError for non-canonical v, got {other:?}"),
-        }
+        let result = decode_signed_tx(&raw);
+        assert!(
+            matches!(
+                result,
+                Err(SignerError::ParseError(ref msg))
+                    if msg.contains("non-canonical EIP-155 v value")
+            ),
+            "expected ParseError for non-canonical v, got {result:?}"
+        );
     }
 
     #[test]
@@ -1296,5 +1521,265 @@ mod tests {
             decode_signed_tx(type2.raw_tx()).unwrap().from,
             expected_addr
         );
+    }
+
+    #[test]
+    fn test_eip155_known_signing_vector() {
+        // EIP-155 reference vector:
+        // https://eips.ethereum.org/EIPS/eip-155
+        let signer = EthereumSigner::from_bytes(&[0x46; 32]).unwrap();
+        let tx = LegacyTransaction {
+            nonce: 9,
+            gas_price: 20_000_000_000,
+            gas_limit: 21_000,
+            to: Some([0x35; 20]),
+            value: 1_000_000_000_000_000_000,
+            data: vec![],
+            chain_id: 1,
+        };
+        let signed = tx.sign(&signer).unwrap();
+        assert_eq!(
+            hex::encode(signed.raw_tx()),
+            "f86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83"
+        );
+    }
+
+    #[test]
+    fn test_decode_rejects_non_canonical_zero_nonce_encoding() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = LegacyTransaction {
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: Some([0x11; 20]),
+            value: 0,
+            data: vec![],
+            chain_id: 1,
+        };
+        let signed = tx.sign(&signer).unwrap();
+        let mut malformed = signed.raw_tx().to_vec();
+
+        // Legacy list header is either 1 byte (short) or 1+len_of_len bytes (long).
+        let header_len = if malformed[0] <= 0xF7 {
+            1usize
+        } else {
+            1 + usize::from(malformed[0] - 0xF7)
+        };
+        assert_eq!(malformed[header_len], 0x80, "nonce=0 canonical encoding");
+        malformed[header_len] = 0x00; // non-canonical integer zero
+
+        let err = decode_signed_tx(&malformed).unwrap_err().to_string();
+        assert!(err.contains("non-canonical"));
+    }
+
+    #[test]
+    fn test_sign_rejects_zero_chain_id() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+
+        let legacy = LegacyTransaction {
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: Some([0xAA; 20]),
+            value: 0,
+            data: vec![],
+            chain_id: 0,
+        };
+        assert!(legacy.sign(&signer).is_err());
+
+        let type1 = EIP2930Transaction {
+            chain_id: 0,
+            nonce: 0,
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: Some([0xAA; 20]),
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+        };
+        assert!(type1.sign(&signer).is_err());
+
+        let type2 = EIP1559Transaction {
+            chain_id: 0,
+            nonce: 0,
+            max_priority_fee_per_gas: 1,
+            max_fee_per_gas: 1,
+            gas_limit: 21_000,
+            to: Some([0xAA; 20]),
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+        };
+        assert!(type2.sign(&signer).is_err());
+
+        let type3 = EIP4844Transaction {
+            chain_id: 0,
+            nonce: 0,
+            max_priority_fee_per_gas: 1,
+            max_fee_per_gas: 1,
+            gas_limit: 21_000,
+            to: [0xAA; 20],
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+            max_fee_per_blob_gas: 1,
+            blob_versioned_hashes: vec![[0x01; 32]],
+        };
+        assert!(type3.sign(&signer).is_err());
+    }
+
+    #[test]
+    fn test_type2_sign_rejects_priority_fee_above_max_fee() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+        let tx = EIP1559Transaction {
+            chain_id: 1,
+            nonce: 0,
+            max_priority_fee_per_gas: 10,
+            max_fee_per_gas: 9,
+            gas_limit: 21_000,
+            to: Some([0xAA; 20]),
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+        };
+        assert!(tx.sign(&signer).is_err());
+    }
+
+    #[test]
+    fn test_type3_sign_rejects_invalid_blob_hashes() {
+        let signer = EthereumSigner::from_bytes(&[0x42; 32]).unwrap();
+
+        let empty = EIP4844Transaction {
+            chain_id: 1,
+            nonce: 0,
+            max_priority_fee_per_gas: 1,
+            max_fee_per_gas: 1,
+            gas_limit: 21_000,
+            to: [0xAA; 20],
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+            max_fee_per_blob_gas: 1,
+            blob_versioned_hashes: vec![],
+        };
+        assert!(empty.sign(&signer).is_err());
+
+        let mut bad_hash = [0u8; 32];
+        bad_hash[0] = 0x02;
+        let invalid = EIP4844Transaction {
+            chain_id: 1,
+            nonce: 0,
+            max_priority_fee_per_gas: 1,
+            max_fee_per_gas: 1,
+            gas_limit: 21_000,
+            to: [0xAA; 20],
+            value: 0,
+            data: vec![],
+            access_list: vec![],
+            max_fee_per_blob_gas: 1,
+            blob_versioned_hashes: vec![bad_hash],
+        };
+        assert!(invalid.sign(&signer).is_err());
+    }
+
+    #[test]
+    fn test_decode_type2_rejects_max_fee_below_priority_fee() {
+        let mut items = Vec::new();
+        items.extend_from_slice(&rlp::encode_u64(1)); // chain_id
+        items.extend_from_slice(&rlp::encode_u64(0)); // nonce
+        items.extend_from_slice(&rlp::encode_u64(2)); // max_priority_fee_per_gas
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_fee_per_gas (invalid)
+        items.extend_from_slice(&rlp::encode_u64(21_000)); // gas_limit
+        items.extend_from_slice(&rlp::encode_bytes(&[0x11; 20])); // to
+        items.extend_from_slice(&rlp::encode_u64(0)); // value
+        items.extend_from_slice(&rlp::encode_bytes(&[])); // data
+        items.extend_from_slice(&rlp::encode_empty_list()); // access_list
+        items.extend_from_slice(&rlp::encode_u64(0)); // y_parity
+        items.extend_from_slice(&rlp::encode_u64(1)); // r
+        items.extend_from_slice(&rlp::encode_u64(1)); // s
+        let mut raw = vec![0x02];
+        raw.extend_from_slice(&rlp::encode_list(&items));
+
+        let err = decode_signed_tx(&raw).unwrap_err().to_string();
+        assert!(err.contains("max_fee_per_gas cannot be lower"));
+    }
+
+    #[test]
+    fn test_decode_type1_rejects_non_list_access_list() {
+        let mut items = Vec::new();
+        items.extend_from_slice(&rlp::encode_u64(1)); // chain_id
+        items.extend_from_slice(&rlp::encode_u64(0)); // nonce
+        items.extend_from_slice(&rlp::encode_u64(1)); // gas_price
+        items.extend_from_slice(&rlp::encode_u64(21_000)); // gas_limit
+        items.extend_from_slice(&rlp::encode_bytes(&[0x11; 20])); // to
+        items.extend_from_slice(&rlp::encode_u64(0)); // value
+        items.extend_from_slice(&rlp::encode_bytes(&[])); // data
+        items.extend_from_slice(&rlp::encode_bytes(&[0x01])); // malformed access_list
+        items.extend_from_slice(&rlp::encode_u64(0)); // y_parity
+        items.extend_from_slice(&rlp::encode_u64(1)); // r
+        items.extend_from_slice(&rlp::encode_u64(1)); // s
+        let mut raw = vec![0x01];
+        raw.extend_from_slice(&rlp::encode_list(&items));
+
+        let err = decode_signed_tx(&raw).unwrap_err().to_string();
+        assert!(err.contains("access_list must be an RLP list"));
+    }
+
+    #[test]
+    fn test_decode_type3_rejects_contract_creation_and_bad_blob_version() {
+        let mut blob_items = Vec::new();
+        let mut bad_hash = [0u8; 32];
+        bad_hash[0] = 0x02;
+        blob_items.extend_from_slice(&rlp::encode_bytes(&bad_hash));
+
+        let mut items = Vec::new();
+        items.extend_from_slice(&rlp::encode_u64(1)); // chain_id
+        items.extend_from_slice(&rlp::encode_u64(0)); // nonce
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_priority_fee_per_gas
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_fee_per_gas
+        items.extend_from_slice(&rlp::encode_u64(21_000)); // gas_limit
+        items.extend_from_slice(&rlp::encode_bytes(&[])); // to (invalid for type3)
+        items.extend_from_slice(&rlp::encode_u64(0)); // value
+        items.extend_from_slice(&rlp::encode_bytes(&[])); // data
+        items.extend_from_slice(&rlp::encode_empty_list()); // access_list
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_fee_per_blob_gas
+        items.extend_from_slice(&rlp::encode_list(&blob_items)); // blob hashes
+        items.extend_from_slice(&rlp::encode_u64(0)); // y_parity
+        items.extend_from_slice(&rlp::encode_u64(1)); // r
+        items.extend_from_slice(&rlp::encode_u64(1)); // s
+        let mut raw = vec![0x03];
+        raw.extend_from_slice(&rlp::encode_list(&items));
+
+        let err = decode_signed_tx(&raw).unwrap_err().to_string();
+        assert!(err.contains("contract creation is not allowed"));
+    }
+
+    #[test]
+    fn test_decode_type3_rejects_bad_blob_version_hash() {
+        let mut blob_items = Vec::new();
+        let mut bad_hash = [0u8; 32];
+        bad_hash[0] = 0x02;
+        blob_items.extend_from_slice(&rlp::encode_bytes(&bad_hash));
+
+        let mut items = Vec::new();
+        items.extend_from_slice(&rlp::encode_u64(1)); // chain_id
+        items.extend_from_slice(&rlp::encode_u64(0)); // nonce
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_priority_fee_per_gas
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_fee_per_gas
+        items.extend_from_slice(&rlp::encode_u64(21_000)); // gas_limit
+        items.extend_from_slice(&rlp::encode_bytes(&[0x11; 20])); // to
+        items.extend_from_slice(&rlp::encode_u64(0)); // value
+        items.extend_from_slice(&rlp::encode_bytes(&[])); // data
+        items.extend_from_slice(&rlp::encode_empty_list()); // access_list
+        items.extend_from_slice(&rlp::encode_u64(1)); // max_fee_per_blob_gas
+        items.extend_from_slice(&rlp::encode_list(&blob_items)); // blob hashes
+        items.extend_from_slice(&rlp::encode_u64(0)); // y_parity
+        items.extend_from_slice(&rlp::encode_u64(1)); // r
+        items.extend_from_slice(&rlp::encode_u64(1)); // s
+        let mut raw = vec![0x03];
+        raw.extend_from_slice(&rlp::encode_list(&items));
+
+        let err = decode_signed_tx(&raw).unwrap_err().to_string();
+        assert!(err.contains("must start with 0x01"));
     }
 }

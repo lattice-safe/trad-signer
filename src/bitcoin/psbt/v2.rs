@@ -808,16 +808,13 @@ fn compact_size(n: usize) -> Vec<u8> {
 
 /// Read a compact_size from a serialized value.
 fn read_compact_size(data: &[u8]) -> Result<usize, SignerError> {
-    let mut offset = 0usize;
-    let value = encoding::read_compact_size(data, &mut offset)
-        .map_err(|e| SignerError::ParseError(format!("compact_size: {e}")))?;
-    if offset != data.len() {
+    let (value, consumed) = decode_compact_size_with_consumed(data)?;
+    if consumed != data.len() {
         return Err(SignerError::ParseError(
             "compact_size: trailing bytes".into(),
         ));
     }
-    usize::try_from(value)
-        .map_err(|_| SignerError::ParseError("compact_size: value exceeds platform usize".into()))
+    Ok(value)
 }
 
 /// Read a compact_size at a position. Returns (value, bytes_consumed).
@@ -825,59 +822,17 @@ fn read_compact_size_at(data: &[u8], pos: usize) -> Result<(usize, usize), Signe
     if pos >= data.len() {
         return Err(SignerError::ParseError("unexpected end of PSBT".into()));
     }
-    let first = data[pos];
-    if first < 0xFD {
-        Ok((first as usize, 1))
-    } else if first == 0xFD {
-        let end = pos
-            .checked_add(3)
-            .ok_or_else(|| SignerError::ParseError("compact size offset overflow".into()))?;
-        if end > data.len() {
-            return Err(SignerError::ParseError("truncated compact size".into()));
-        }
-        let val = u16::from_le_bytes([data[pos + 1], data[pos + 2]]);
-        if val < 0xFD {
-            return Err(SignerError::ParseError("non-canonical compact size".into()));
-        }
-        Ok((usize::from(val), 3))
-    } else if first == 0xFE {
-        let end = pos
-            .checked_add(5)
-            .ok_or_else(|| SignerError::ParseError("compact size offset overflow".into()))?;
-        if end > data.len() {
-            return Err(SignerError::ParseError("truncated compact size".into()));
-        }
-        let val = u32::from_le_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]]);
-        if val <= 0xFFFF {
-            return Err(SignerError::ParseError("non-canonical compact size".into()));
-        }
-        let val = usize::try_from(val)
-            .map_err(|_| SignerError::ParseError("compact size exceeds platform usize".into()))?;
-        Ok((val, 5))
-    } else {
-        let end = pos
-            .checked_add(9)
-            .ok_or_else(|| SignerError::ParseError("compact size offset overflow".into()))?;
-        if end > data.len() {
-            return Err(SignerError::ParseError("truncated compact size".into()));
-        }
-        let val = u64::from_le_bytes([
-            data[pos + 1],
-            data[pos + 2],
-            data[pos + 3],
-            data[pos + 4],
-            data[pos + 5],
-            data[pos + 6],
-            data[pos + 7],
-            data[pos + 8],
-        ]);
-        if val <= 0xFFFF_FFFF {
-            return Err(SignerError::ParseError("non-canonical compact size".into()));
-        }
-        let val = usize::try_from(val)
-            .map_err(|_| SignerError::ParseError("compact size exceeds platform usize".into()))?;
-        Ok((val, 9))
-    }
+    decode_compact_size_with_consumed(&data[pos..])
+}
+
+fn decode_compact_size_with_consumed(data: &[u8]) -> Result<(usize, usize), SignerError> {
+    let mut offset = 0usize;
+    let value = encoding::read_compact_size(data, &mut offset)
+        .map_err(|e| SignerError::ParseError(format!("compact_size: {e}")))?;
+    let value = usize::try_from(value).map_err(|_| {
+        SignerError::ParseError("compact_size: value exceeds platform usize".into())
+    })?;
+    Ok((value, offset))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1525,6 +1480,20 @@ mod tests {
     }
 
     #[test]
+    fn test_read_compact_size_rejects_non_canonical_u32_form() {
+        // 65535 must use 0xFD form, not 0xFE form.
+        let data = [0xFE, 0xFF, 0xFF, 0x00, 0x00];
+        assert!(read_compact_size(&data).is_err());
+    }
+
+    #[test]
+    fn test_read_compact_size_rejects_non_canonical_u64_form() {
+        // 0xFFFFFFFF must use 0xFE form, not 0xFF form.
+        let data = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00];
+        assert!(read_compact_size(&data).is_err());
+    }
+
+    #[test]
     fn test_read_compact_size_rejects_trailing_bytes() {
         let data = [0x01, 0x00];
         assert!(read_compact_size(&data).is_err());
@@ -1533,6 +1502,23 @@ mod tests {
     #[test]
     fn test_read_compact_size_empty() {
         assert!(read_compact_size(&[]).is_err());
+    }
+
+    #[test]
+    fn test_read_compact_size_at_reports_consumed_bytes() {
+        let data = [0xFD, 0x00, 0x01, 0xAA];
+        let (v1, c1) = read_compact_size_at(&data, 0).unwrap();
+        assert_eq!(v1, 256);
+        assert_eq!(c1, 3);
+        let (v2, c2) = read_compact_size_at(&data, 3).unwrap();
+        assert_eq!(v2, 0xAA);
+        assert_eq!(c2, 1);
+    }
+
+    #[test]
+    fn test_read_compact_size_at_rejects_non_canonical() {
+        let data = [0xFE, 0x01, 0x00, 0x00, 0x00];
+        assert!(read_compact_size_at(&data, 0).is_err());
     }
 
     // ─── KV Helpers ──────────────────────────────────────────────
